@@ -1,5 +1,6 @@
 const UserWord = require('../models/userWordModel');
 const Word = require('../models/wordModel');
+const { resolveWordData } = require('./wordService');
 
 const normalizeWord = (value) => value.trim().toLowerCase();
 
@@ -87,6 +88,26 @@ const compareUserWordsForDashboard = (left, right) => {
 
 const findDictionaryWord = async (word) => Word.findOne({ word: normalizeWord(word) });
 
+const ensureWordDocument = async (word) => {
+  const normalizedInput = normalizeWord(word);
+  let wordDocument = await findDictionaryWord(normalizedInput);
+
+  if (wordDocument) {
+    return wordDocument;
+  }
+
+  await resolveWordData(normalizedInput);
+  wordDocument = await findDictionaryWord(normalizedInput);
+
+  if (!wordDocument) {
+    const error = new Error('Word not found in dictionary collection.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return wordDocument;
+};
+
 const findModernUserWord = (userId, wordId) =>
   UserWord.findOne({
     user: userId,
@@ -126,13 +147,7 @@ const findUserWordRecord = async (userId, wordDocument) => {
 };
 
 const saveWordForUser = async (userId, word) => {
-  const wordDetails = await findDictionaryWord(word);
-
-  if (!wordDetails) {
-    const error = new Error('Word not found in dictionary collection.');
-    error.statusCode = 404;
-    throw error;
-  }
+  const wordDetails = await ensureWordDocument(word);
 
   const existingUserWord = await findUserWordRecord(userId, wordDetails);
 

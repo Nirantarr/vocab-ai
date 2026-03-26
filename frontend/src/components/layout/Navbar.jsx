@@ -8,6 +8,7 @@ const navLinks = [
   { label: 'How it works', href: '/#how-it-works' },
   { label: 'Analyzer', href: '/#analyzer' },
   { label: 'Dashboard', href: '/dashboard' },
+  { label: 'Test', href: '/test' },
 ]
 
 export default function Navbar() {

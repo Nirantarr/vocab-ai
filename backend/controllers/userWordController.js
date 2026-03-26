@@ -17,7 +17,11 @@ const saveWord = async (req, res) => {
 
     const { userWord, created } = await saveWordForUser(req.user._id, normalizeWord(word));
 
-    return res.status(created ? 201 : 200).json(formatUserWordResponse(userWord));
+    return res.status(created ? 201 : 200).json({
+      success: true,
+      created,
+      ...formatUserWordResponse(userWord),
+    });
   } catch (error) {
     return res.status(error.statusCode || 500).json({ message: error.message || 'Failed to save word.' });
   }

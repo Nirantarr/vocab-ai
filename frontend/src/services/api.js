@@ -105,3 +105,11 @@ export function markLearned(word, isLearned, token) {
     body: JSON.stringify({ word, isLearned }),
   })
 }
+
+export function fetchQuiz(limit, token) {
+  return request(`http://localhost:5000/api/test?limit=${encodeURIComponent(limit)}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+}

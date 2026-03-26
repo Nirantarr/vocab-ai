@@ -1,4 +1,28 @@
-function AnalysisCard({ item }) {
+function SaveButton({ state, onClick }) {
+  const isSaved = state === 'saved'
+  const isSaving = state === 'saving'
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={isSaved || isSaving}
+      className={`rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] transition ${
+        isSaved
+          ? 'cursor-not-allowed border border-emerald-300/20 bg-emerald-400/10 text-emerald-200'
+          : isSaving
+            ? 'cursor-wait border border-cyan-300/20 bg-cyan-400/10 text-cyan-100'
+            : 'border border-cyan-300/20 bg-cyan-400/10 text-cyan-100 hover:border-cyan-300/40 hover:bg-cyan-400/15'
+      }`}
+    >
+      {isSaved ? 'Saved' : isSaving ? 'Saving...' : 'Save Word'}
+    </button>
+  )
+}
+
+function AnalysisCard({ item, saveState, onSaveWord }) {
+  const isWord = item.type === 'word'
+
   return (
     <article className="rounded-[1.5rem] border border-white/10 bg-white/[0.04] p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -6,8 +30,11 @@ function AnalysisCard({ item }) {
           <h3 className="font-serif text-2xl font-bold text-white">{item.text}</h3>
           <p className="mt-1 text-sm capitalize text-cyan-200">{item.type}</p>
         </div>
-        <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-white/60">
-          Selected
+        <div className="flex flex-wrap items-center gap-3">
+          {isWord ? <SaveButton state={saveState} onClick={() => onSaveWord(item)} /> : null}
+          <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-white/60">
+            Selected
+          </div>
         </div>
       </div>
 
@@ -37,7 +64,14 @@ function AnalysisCard({ item }) {
   )
 }
 
-export default function SelectedTextAnalysis({ selectedResults }) {
+export default function SelectedTextAnalysis({
+  selectedResults,
+  onAnalyze,
+  isAnalyzing,
+  canAnalyze,
+  onSaveWord,
+  getSaveState,
+}) {
   if (!selectedResults || selectedResults.length === 0) {
     return null
   }
@@ -51,14 +85,29 @@ export default function SelectedTextAnalysis({ selectedResults }) {
           </p>
           <h2 className="mt-2 font-serif text-3xl font-bold text-white">Highlighted meanings</h2>
         </div>
-        <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white/70">
-          {selectedResults.length} selection{selectedResults.length > 1 ? 's' : ''}
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={onAnalyze}
+            disabled={!canAnalyze || isAnalyzing}
+            className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-4 py-2 text-sm font-semibold text-cyan-100 transition hover:border-cyan-300/40 hover:bg-cyan-400/15 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isAnalyzing ? 'Analyzing...' : 'Analyze Text'}
+          </button>
+          <div className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-white/70">
+            {selectedResults.length} selection{selectedResults.length > 1 ? 's' : ''}
+          </div>
         </div>
       </div>
 
       <div className="mt-6 grid gap-5">
         {selectedResults.map((item) => (
-          <AnalysisCard key={`${item.text}-${item.type}`} item={item} />
+          <AnalysisCard
+            key={`${item.text}-${item.type}`}
+            item={item}
+            saveState={getSaveState(item)}
+            onSaveWord={onSaveWord}
+          />
         ))}
       </div>
     </section>

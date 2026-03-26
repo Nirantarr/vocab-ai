@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { analyzeText, fetchWordDetail, saveWord } from '../../services/api'
@@ -20,13 +20,38 @@ export default function TextAnalyzer() {
   const [wordDetailError, setWordDetailError] = useState('')
   const [savingWord, setSavingWord] = useState(false)
   const [saveMessage, setSaveMessage] = useState('')
+  const [selectedSaveStates, setSelectedSaveStates] = useState({})
+  const [toastMessage, setToastMessage] = useState('')
   const resultRef = useRef(null)
   const textareaRef = useRef(null)
+  const toastTimeoutRef = useRef(null)
 
   const wordCount = useMemo(
     () => text.trim().split(/\s+/).filter(Boolean).length,
     [text]
   )
+
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        window.clearTimeout(toastTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  const normalizeSelectionKey = (value) => value?.trim().toLowerCase() || ''
+
+  const showToast = (message) => {
+    setToastMessage(message)
+
+    if (toastTimeoutRef.current) {
+      window.clearTimeout(toastTimeoutRef.current)
+    }
+
+    toastTimeoutRef.current = window.setTimeout(() => {
+      setToastMessage('')
+    }, 2400)
+  }
 
   const captureSelectedText = () => {
     const browserSelection = window.getSelection?.()?.toString().trim() || ''
@@ -82,6 +107,10 @@ export default function TextAnalyzer() {
     }
   }
 
+  const handleAnalyzeSelectedText = () => {
+    handleAnalyze()
+  }
+
   const handleKeywordClick = async (keyword) => {
     setSelectedKeywords((current) =>
       current.includes(keyword) ? current : [...current, keyword]
@@ -121,6 +150,42 @@ export default function TextAnalyzer() {
       setSaveMessage(requestError.message || 'Unable to save word right now.')
     } finally {
       setSavingWord(false)
+    }
+  }
+
+  const getSelectedSaveState = (item) => selectedSaveStates[normalizeSelectionKey(item.text)] || 'idle'
+
+  const handleSaveSelectedWord = async (item) => {
+    const normalizedKey = normalizeSelectionKey(item.text)
+
+    if (!item?.text || item.type !== 'word') {
+      return
+    }
+
+    if (!token) {
+      showToast('Login required to save words.')
+      return
+    }
+
+    setSelectedSaveStates((current) => ({
+      ...current,
+      [normalizedKey]: 'saving',
+    }))
+
+    try {
+      const data = await saveWord(item.text, token)
+
+      setSelectedSaveStates((current) => ({
+        ...current,
+        [normalizedKey]: 'saved',
+      }))
+      showToast(data.created ? 'Word saved' : 'Word already saved')
+    } catch (requestError) {
+      setSelectedSaveStates((current) => ({
+        ...current,
+        [normalizedKey]: 'idle',
+      }))
+      showToast(requestError.message || 'Unable to save word right now.')
     }
   }
 
@@ -229,13 +294,23 @@ export default function TextAnalyzer() {
                 Highlight words or phrases in the textarea to add them here before analysis.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setSelectedTexts([])}
-              className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-white/55 transition hover:border-white/20 hover:text-white"
-            >
-              Clear all
-            </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleAnalyzeSelectedText}
+                disabled={loading || !text.trim() || selectedTexts.length === 0}
+                className="rounded-full border border-cyan-300/20 bg-cyan-400/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-100 transition hover:border-cyan-300/40 hover:bg-cyan-400/15 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {loading ? 'Analyzing...' : 'Analyze Text'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedTexts([])}
+                className="rounded-full border border-white/10 px-4 py-2 text-xs font-semibold uppercase tracking-[0.18em] text-white/55 transition hover:border-white/20 hover:text-white"
+              >
+                Clear all
+              </button>
+            </div>
           </div>
 
           <div className="mt-4 flex flex-wrap gap-3">
@@ -261,7 +336,14 @@ export default function TextAnalyzer() {
         </div>
       ) : null}
 
-      <SelectedTextAnalysis selectedResults={selectedResults} />
+      <SelectedTextAnalysis
+        selectedResults={selectedResults}
+        onAnalyze={handleAnalyzeSelectedText}
+        isAnalyzing={loading}
+        canAnalyze={Boolean(text.trim()) && selectedTexts.length > 0}
+        onSaveWord={handleSaveSelectedWord}
+        getSaveState={getSelectedSaveState}
+      />
 
       <KeywordList
         keywords={keywords}
@@ -285,6 +367,12 @@ export default function TextAnalyzer() {
         isSaving={savingWord}
         saveMessage={saveMessage}
       />
+
+      {toastMessage ? (
+        <div className="fixed bottom-6 right-6 z-50 rounded-2xl border border-cyan-300/20 bg-slate-950/90 px-5 py-3 text-sm font-medium text-cyan-100 shadow-[0_16px_36px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+          {toastMessage}
+        </div>
+      ) : null}
     </section>
   )
 }
