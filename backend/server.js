@@ -7,6 +7,7 @@ const wordRoutes = require('./routes/wordRoutes');
 const analyzeRoutes = require('./routes/analyzeRoutes');
 const userWordRoutes = require('./routes/userWordRoutes');
 const testRoutes = require('./routes/testRoutes');
+const translateRoutes = require('./routes/translateRoutes');
 
 dotenv.config();
 
@@ -22,6 +23,7 @@ app.use('/api/word', wordRoutes);
 app.use('/api/analyze', analyzeRoutes);
 app.use('/api/user', userWordRoutes);
 app.use('/api/test', testRoutes);
+app.use('/api/translate', translateRoutes);
 
 app.get('/', (_req, res) => {
   res.status(200).send('API is running');

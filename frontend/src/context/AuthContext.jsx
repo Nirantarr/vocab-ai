@@ -1,5 +1,6 @@
 import { createContext, useContext, useMemo, useState } from 'react'
 import { requestAuth } from '../services/api'
+import { notifyExtensionAuthSuccess } from '../services/extensionAuth'
 
 const AuthContext = createContext(null)
 
@@ -28,6 +29,7 @@ export function AuthProvider({ children }) {
 
     setToken(data.token)
     setUser(data.user)
+    await notifyExtensionAuthSuccess(data.token)
 
     return data
   }

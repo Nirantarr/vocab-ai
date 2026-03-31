@@ -1,0 +1,142 @@
+.vocabai-popup {
+  position: absolute;
+  z-index: 2147483647;
+  width: min(300px, calc(100vw - 24px));
+  max-width: 300px;
+  background: #ffffff;
+  border-radius: 14px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+  padding: 14px 16px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  font-family: Arial, sans-serif;
+  color: #0f172a;
+}
+
+.vocabai-popup.wide-popup {
+  width: min(500px, calc(100vw - 24px));
+  max-width: 500px;
+}
+
+.vocabai-popup__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vocabai-popup__title {
+  font-weight: 700;
+  font-size: 15px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.vocabai-popup__close {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+  color: #64748b;
+  padding: 0;
+}
+
+.vocabai-popup__body {
+  margin-top: 10px;
+  max-height: 200px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.vocabai-popup__field {
+  margin-top: 10px;
+}
+
+.vocabai-popup__actions {
+  margin-top: 14px;
+}
+
+.vocabai-popup__translate {
+  margin-top: 14px;
+}
+
+.vocabai-popup__translate-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.vocabai-popup__select {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 10px;
+  background: #ffffff;
+  color: #0f172a;
+  padding: 9px 10px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.vocabai-popup__save {
+  border: none;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #ffffff;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.vocabai-popup__translate-button {
+  border: none;
+  border-radius: 10px;
+  background: #2563eb;
+  color: #ffffff;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.vocabai-popup__translate-button:disabled,
+.vocabai-popup__save:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.vocabai-popup__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.vocabai-popup__value,
+.vocabai-popup__status {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 1.75;
+  color: #334155;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.vocabai-popup__status--error {
+  color: #b91c1c;
+}
+
+.vocabai-popup__toggle-preview {
+  margin-top: 8px;
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}

@@ -15,7 +15,7 @@ const saveWord = async (req, res) => {
       return res.status(400).json({ message: 'Word is required.' });
     }
 
-    const { userWord, created } = await saveWordForUser(req.user._id, normalizeWord(word));
+    const { userWord, created } = await saveWordForUser(req.user._id, req.body);
 
     return res.status(created ? 201 : 200).json({
       success: true,

@@ -88,9 +88,50 @@ const compareUserWordsForDashboard = (left, right) => {
 
 const findDictionaryWord = async (word) => Word.findOne({ word: normalizeWord(word) });
 
-const ensureWordDocument = async (word) => {
-  const normalizedInput = normalizeWord(word);
+const sanitizeOptionalWordList = (values) => {
+  if (!Array.isArray(values)) {
+    return [];
+  }
+
+  return [...new Set(values
+    .filter((value) => typeof value === 'string')
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean))];
+};
+
+const createWordDocumentFromPayload = async (payload) => {
+  const normalizedWord = normalizeWord(payload.word);
+  const meaning = typeof payload.meaning === 'string' ? payload.meaning.trim() : '';
+
+  if (!meaning) {
+    return null;
+  }
+
+  try {
+    return await Word.create({
+      word: normalizedWord,
+      meaning,
+      synonyms: sanitizeOptionalWordList(payload.synonyms),
+      antonyms: sanitizeOptionalWordList(payload.antonyms),
+    });
+  } catch (error) {
+    if (error.code === 11000) {
+      return findDictionaryWord(normalizedWord);
+    }
+
+    throw error;
+  }
+};
+
+const ensureWordDocument = async (payload) => {
+  const normalizedInput = normalizeWord(payload.word);
   let wordDocument = await findDictionaryWord(normalizedInput);
+
+  if (wordDocument) {
+    return wordDocument;
+  }
+
+  wordDocument = await createWordDocumentFromPayload(payload);
 
   if (wordDocument) {
     return wordDocument;
@@ -146,8 +187,8 @@ const findUserWordRecord = async (userId, wordDocument) => {
   return migrateLegacyUserWord(legacyUserWordId, wordDocument._id);
 };
 
-const saveWordForUser = async (userId, word) => {
-  const wordDetails = await ensureWordDocument(word);
+const saveWordForUser = async (userId, payload) => {
+  const wordDetails = await ensureWordDocument(payload);
 
   const existingUserWord = await findUserWordRecord(userId, wordDetails);
 
