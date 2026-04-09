@@ -39,20 +39,24 @@ function ensurePopup() {
 }
 
 function positionPopup(popup, rect) {
-  const scrollX = window.scrollX;
-  const scrollY = window.scrollY;
   const popupWidth = popup.offsetWidth || 300;
+  const popupHeight = popup.offsetHeight || 220;
   const viewportWidth = document.documentElement.clientWidth;
+  const viewportHeight = window.innerHeight;
 
-  let left = rect.left + scrollX;
-  let top = rect.bottom + scrollY + POPUP_MARGIN;
+  let left = rect.left;
+  let top = rect.bottom + POPUP_MARGIN;
 
-  if (left + popupWidth > scrollX + viewportWidth - POPUP_MARGIN) {
-    left = scrollX + viewportWidth - popupWidth - POPUP_MARGIN;
+  if (left + popupWidth > viewportWidth - POPUP_MARGIN) {
+    left = viewportWidth - popupWidth - POPUP_MARGIN;
   }
 
-  if (left < scrollX + POPUP_MARGIN) {
-    left = scrollX + POPUP_MARGIN;
+  if (left < POPUP_MARGIN) {
+    left = POPUP_MARGIN;
+  }
+
+  if (top + popupHeight > viewportHeight - POPUP_MARGIN) {
+    top = Math.max(POPUP_MARGIN, rect.top - popupHeight - POPUP_MARGIN);
   }
 
   popup.style.left = `${left}px`;
@@ -105,7 +109,7 @@ function initializePopupHandlers() {
       document.documentElement.clientWidth - popupRect.width - POPUP_MARGIN
     );
 
-    currentPopup.style.left = `${clampedLeft + window.scrollX}px`;
+    currentPopup.style.left = `${clampedLeft}px`;
   });
 }
 

@@ -17,10 +17,20 @@ const normalizeTranslatedText = (data) => {
     .join('');
 };
 
-const translateText = async (text, targetLang) => {
+const getDetectedLanguage = (data) => {
+  if (typeof data?.[2] === 'string' && data[2].trim()) {
+    return data[2].trim().toLowerCase();
+  }
+
+  return '';
+};
+
+const requestTranslation = async (text, targetLang, sourceLang = 'auto') => {
   const normalizedText = typeof text === 'string' ? text.trim() : '';
   const normalizedTargetLang =
     typeof targetLang === 'string' ? targetLang.trim().toLowerCase() : '';
+  const normalizedSourceLang =
+    typeof sourceLang === 'string' && sourceLang.trim() ? sourceLang.trim().toLowerCase() : 'auto';
 
   if (!normalizedText) {
     throw createHttpError(400, 'Text is required.');
@@ -34,22 +44,14 @@ const translateText = async (text, targetLang) => {
     const response = await axios.get('https://translate.googleapis.com/translate_a/single', {
       params: {
         client: 'gtx',
-        sl: 'auto',
+        sl: normalizedSourceLang,
         tl: normalizedTargetLang,
         dt: 't',
         q: normalizedText,
       },
     });
 
-    const translatedText = normalizeTranslatedText(response.data);
-
-    if (!translatedText) {
-      throw createHttpError(502, 'Translation failed.');
-    }
-
-    return {
-      translatedText,
-    };
+    return response.data;
   } catch (error) {
     if (error.statusCode) {
       throw error;
@@ -59,6 +61,39 @@ const translateText = async (text, targetLang) => {
   }
 };
 
+const translateText = async (text, targetLang, sourceLang = 'auto') => {
+  const translationData = await requestTranslation(text, targetLang, sourceLang);
+  const translatedText = normalizeTranslatedText(translationData);
+
+  if (!translatedText) {
+    throw createHttpError(502, 'Translation failed.');
+  }
+
+  return {
+    translatedText,
+    detectedLanguage: getDetectedLanguage(translationData),
+  };
+};
+
+const translateWordList = async (values, targetLang, sourceLang = 'auto') => {
+  if (!Array.isArray(values) || values.length === 0) {
+    return [];
+  }
+
+  const translatedValues = await Promise.all(
+    values
+      .filter((value) => typeof value === 'string' && value.trim())
+      .map(async (value) => {
+        const { translatedText } = await translateText(value, targetLang, sourceLang);
+        return translatedText;
+      })
+  );
+
+  return [...new Set(translatedValues.filter((value) => typeof value === 'string' && value.trim()))];
+};
+
 module.exports = {
+  createHttpError,
   translateText,
+  translateWordList,
 };

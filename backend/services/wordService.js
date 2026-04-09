@@ -1,17 +1,14 @@
 const axios = require('axios');
 const Word = require('../models/wordModel');
+const { createHttpError, translateText, translateWordList } = require('./translateService');
 
-const createHttpError = (statusCode, message) => {
-  const error = new Error(message);
-  error.statusCode = statusCode;
-  return error;
-};
-
-const buildWordResponse = (wordDocument) => ({
+const buildWordResponse = (wordDocument, overrides = {}) => ({
   word: wordDocument.word,
+  language: 'en',
   meaning: wordDocument.meaning,
   synonyms: wordDocument.synonyms,
   antonyms: wordDocument.antonyms,
+  ...overrides,
 });
 
 const sanitizeWordList = (values = []) => {
@@ -58,7 +55,34 @@ const extractWordData = (apiEntry, normalizedWord) => {
   return null;
 };
 
-const resolveWordData = async (inputWord) => {
+const fetchEnglishDictionaryWord = async (normalizedWord) => {
+  let apiResponse;
+
+  try {
+    apiResponse = await axios.get(
+      `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(normalizedWord)}`
+    );
+  } catch (error) {
+    if (error.response?.status === 404) {
+      throw createHttpError(404, 'Word not found.');
+    }
+
+    throw createHttpError(502, 'Failed to fetch word data from dictionary API.');
+  }
+
+  const [apiEntry] = Array.isArray(apiResponse.data) ? apiResponse.data : [];
+  const wordData = apiEntry ? extractWordData(apiEntry, normalizedWord) : null;
+
+  if (!wordData) {
+    throw createHttpError(404, 'Word meaning not found.');
+  }
+
+  return wordData;
+};
+
+const findCachedEnglishWord = async (normalizedWord) => Word.findOne({ word: normalizedWord });
+
+const resolveEnglishWordData = async (inputWord) => {
   const normalizedWord = inputWord.trim().toLowerCase();
 
   if (!normalizedWord) {
@@ -66,42 +90,20 @@ const resolveWordData = async (inputWord) => {
   }
 
   try {
-    const existingWord = await Word.findOne({ word: normalizedWord });
+    const existingWord = await findCachedEnglishWord(normalizedWord);
 
     if (existingWord) {
-      return buildWordResponse(existingWord);
+      return existingWord;
     }
 
-    let apiResponse;
-
-    try {
-      apiResponse = await axios.get(
-        `https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(normalizedWord)}`
-      );
-    } catch (error) {
-      if (error.response?.status === 404) {
-        throw createHttpError(404, 'Word not found.');
-      }
-
-      throw createHttpError(502, 'Failed to fetch word data from dictionary API.');
-    }
-
-    const [apiEntry] = Array.isArray(apiResponse.data) ? apiResponse.data : [];
-    const wordData = apiEntry ? extractWordData(apiEntry, normalizedWord) : null;
-
-    if (!wordData) {
-      throw createHttpError(404, 'Word meaning not found.');
-    }
-
-    const savedWord = await Word.create(wordData);
-
-    return buildWordResponse(savedWord);
+    const wordData = await fetchEnglishDictionaryWord(normalizedWord);
+    return await Word.create(wordData);
   } catch (error) {
     if (error.code === 11000) {
-      const duplicatedWord = await Word.findOne({ word: normalizedWord });
+      const duplicatedWord = await findCachedEnglishWord(normalizedWord);
 
       if (duplicatedWord) {
-        return buildWordResponse(duplicatedWord);
+        return duplicatedWord;
       }
     }
 
@@ -111,6 +113,44 @@ const resolveWordData = async (inputWord) => {
 
     throw createHttpError(500, 'Failed to fetch word.');
   }
+};
+
+const translateWordPayload = async (wordDocument, originalWord, sourceLanguage) => {
+  if (!sourceLanguage || sourceLanguage === 'en') {
+    return buildWordResponse(wordDocument, {
+      word: originalWord || wordDocument.word,
+      language: 'en',
+    });
+  }
+
+  const [meaningResult, synonyms, antonyms] = await Promise.all([
+    translateText(wordDocument.meaning, sourceLanguage, 'en'),
+    translateWordList(wordDocument.synonyms, sourceLanguage, 'en'),
+    translateWordList(wordDocument.antonyms, sourceLanguage, 'en'),
+  ]);
+
+  return buildWordResponse(wordDocument, {
+    word: originalWord,
+    language: sourceLanguage,
+    meaning: meaningResult.translatedText,
+    synonyms,
+    antonyms,
+  });
+};
+
+const resolveWordData = async (inputWord) => {
+  const rawInput = typeof inputWord === 'string' ? inputWord.trim() : '';
+
+  if (!rawInput) {
+    throw createHttpError(400, 'Word parameter is required.');
+  }
+
+  const translationToEnglish = await translateText(rawInput, 'en');
+  const sourceLanguage = translationToEnglish.detectedLanguage || 'en';
+  const englishLookupWord = translationToEnglish.translatedText.trim().toLowerCase();
+  const englishWordDocument = await resolveEnglishWordData(englishLookupWord);
+
+  return translateWordPayload(englishWordDocument, rawInput, sourceLanguage);
 };
 
 module.exports = {

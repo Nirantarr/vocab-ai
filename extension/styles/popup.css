@@ -1,5 +1,5 @@
 .vocabai-popup {
-  position: absolute;
+  position: fixed;
   z-index: 2147483647;
   width: min(300px, calc(100vw - 24px));
   max-width: 300px;
@@ -24,12 +24,40 @@
   gap: 12px;
 }
 
+.vocabai-popup__header-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.vocabai-popup__title-row,
+.vocabai-popup__field-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .vocabai-popup__title {
   font-weight: 700;
   font-size: 15px;
   line-height: 1.5;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.vocabai-popup__language-badge {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .vocabai-popup__close {
@@ -106,6 +134,19 @@
 .vocabai-popup__save:disabled {
   cursor: not-allowed;
   opacity: 0.7;
+}
+
+.vocabai-popup__copy {
+  flex-shrink: 0;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #475569;
+  padding: 3px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
 }
 
 .vocabai-popup__label {

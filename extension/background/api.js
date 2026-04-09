@@ -20,6 +20,7 @@ export async function fetchWordDetails(selectedText) {
 
   return {
     word: data.word,
+    language: typeof data.language === "string" ? data.language : "",
     meaning: data.meaning,
     synonyms: Array.isArray(data.synonyms) ? data.synonyms : [],
     antonyms: Array.isArray(data.antonyms) ? data.antonyms : []

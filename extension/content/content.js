@@ -18,6 +18,7 @@ window.VocabAIExtension = window.VocabAIExtension || {};
   } = window.VocabAIExtension.popup;
   const { initializeSelectionListener } = window.VocabAIExtension.selection;
   let popupState = null;
+  const copyResetTimers = {};
 
   function getAllowedLanguage(value) {
     return LANGUAGE_OPTIONS.some((option) => option.value === value)
@@ -47,6 +48,7 @@ window.VocabAIExtension = window.VocabAIExtension || {};
         selectedText: popupState.selectedText,
         isExpanded: popupState.isExpanded,
         word: popupState.word,
+        language: popupState.language,
         meaning: popupState.meaning,
         synonyms: popupState.synonyms,
         antonyms: popupState.antonyms,
@@ -58,7 +60,8 @@ window.VocabAIExtension = window.VocabAIExtension || {};
         saveMessage: popupState.saveMessage,
         isAuthenticated: popupState.isAuthenticated,
         allowSave: popupState.allowSave,
-        showTranslate: popupState.showTranslate
+        showTranslate: popupState.showTranslate,
+        copyFeedback: popupState.copyFeedback
       }),
       popupState.rect,
       {
@@ -67,8 +70,83 @@ window.VocabAIExtension = window.VocabAIExtension || {};
     );
 
     bindPreviewToggle();
+    bindCopyButtons();
     bindTranslateControls();
     bindSaveButton();
+  }
+
+  async function copyToClipboard(text) {
+    let normalizedText = text;
+
+    if (Array.isArray(normalizedText)) {
+      normalizedText = normalizedText.join(", ");
+    }
+
+    if (typeof normalizedText !== "string" || !normalizedText.trim()) {
+      normalizedText = "No data available";
+    }
+
+    console.log("VocabAI copied text:", normalizedText);
+    await navigator.clipboard.writeText(normalizedText);
+  }
+
+  function setCopyFeedback(copyType, message) {
+    popupState = {
+      ...popupState,
+      copyFeedback: {
+        ...(popupState.copyFeedback || {}),
+        [copyType]: message
+      }
+    };
+    renderCurrentPopup();
+
+    if (copyResetTimers[copyType]) {
+      window.clearTimeout(copyResetTimers[copyType]);
+    }
+
+    copyResetTimers[copyType] = window.setTimeout(() => {
+      if (!hasActivePopupState()) {
+        return;
+      }
+
+      popupState = {
+        ...popupState,
+        copyFeedback: {
+          ...(popupState.copyFeedback || {}),
+          [copyType]: ""
+        }
+      };
+      renderCurrentPopup();
+    }, 1500);
+  }
+
+  function bindCopyButtons() {
+    const copyButtons = document.querySelectorAll(".vocabai-popup__copy");
+
+    if (!copyButtons.length || !hasActivePopupState()) {
+      return;
+    }
+
+    copyButtons.forEach((button) => {
+      button.onclick = async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const copyType = button.dataset.copyType || "";
+        const copyValue = button.dataset.copyValue || "";
+
+        if (!copyType) {
+          return;
+        }
+
+        try {
+          await copyToClipboard(copyValue);
+          setCopyFeedback(copyType, "Copied \u2705");
+        } catch (_error) {
+          setCopyFeedback(copyType, "Copy failed");
+        }
+      };
+    });
   }
 
   function bindPreviewToggle() {
@@ -460,10 +538,13 @@ window.VocabAIExtension = window.VocabAIExtension || {};
         getStoredTargetLanguage()
       ]);
 
+      console.log("VocabAI received word data:", data);
+
       popupState = {
         selectedText: text,
         rect,
         word: data.word,
+        language: data.language || "",
         meaning: data.meaning,
         synonyms: Array.isArray(data.synonyms) ? data.synonyms : [],
         antonyms: Array.isArray(data.antonyms) ? data.antonyms : [],
@@ -477,17 +558,27 @@ window.VocabAIExtension = window.VocabAIExtension || {};
         allowSave: isSingleWordSelection(text),
         showTranslate: true,
         isLongSelection: text.length > LONG_TEXT_THRESHOLD,
-        isExpanded: false
+        isExpanded: false,
+        copyFeedback: {}
       };
       renderCurrentPopup();
     } catch (_error) {
       const targetLang = await getStoredTargetLanguage().catch(() => DEFAULT_TARGET_LANG);
       const authenticated = await getAuthStatus().catch(() => false);
 
+      console.log("VocabAI received fallback data for selection:", {
+        word: text,
+        language: "",
+        meaning: "Meaning is unavailable for this selection.",
+        synonyms: [],
+        antonyms: []
+      });
+
       popupState = {
         selectedText: text,
         rect,
         word: text,
+        language: "",
         meaning: "Meaning is unavailable for this selection.",
         synonyms: [],
         antonyms: [],
@@ -501,7 +592,8 @@ window.VocabAIExtension = window.VocabAIExtension || {};
         allowSave: false,
         showTranslate: true,
         isLongSelection: text.length > LONG_TEXT_THRESHOLD,
-        isExpanded: false
+        isExpanded: false,
+        copyFeedback: {}
       };
 
       renderCurrentPopup();

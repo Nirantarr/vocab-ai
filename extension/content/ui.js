@@ -24,11 +24,53 @@ function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
-function renderField(label, value) {
+function normalizeListText(value) {
+  if (Array.isArray(value)) {
+    const filteredValues = value
+      .filter((item) => typeof item === "string" && item.trim())
+      .map((item) => item.trim());
+
+    if (filteredValues.length === 0) {
+      return "No data available";
+    }
+
+    return filteredValues.join(", ");
+  }
+
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+
+  return "No data available";
+}
+
+function renderCopyButton(copyType, copyValue, copyFeedback = "") {
+  const normalizedCopyValue = normalizeListText(copyValue);
+
+  const buttonLabel = copyFeedback || "Copy";
+
+  return `
+    <button
+      type="button"
+      class="vocabai-popup__copy"
+      data-copy-type="${escapeHtml(copyType)}"
+      data-copy-value="${escapeHtml(normalizedCopyValue)}"
+    >
+      ${escapeHtml(buttonLabel)}
+    </button>
+  `;
+}
+
+function renderField(label, value, { copyType = "", copyValue = value, copyFeedback = "" } = {}) {
+  const normalizedValue = normalizeListText(value);
+
   return `
     <div class="vocabai-popup__field">
-      <div class="vocabai-popup__label">${escapeHtml(label)}</div>
-      <div class="vocabai-popup__value">${escapeHtml(value)}</div>
+      <div class="vocabai-popup__field-header">
+        <div class="vocabai-popup__label">${escapeHtml(label)}</div>
+        ${renderCopyButton(copyType, copyValue, copyFeedback)}
+      </div>
+      <div class="vocabai-popup__value">${escapeHtml(normalizedValue)}</div>
     </div>
   `;
 }
@@ -64,10 +106,26 @@ function renderSelectionPreview(selectedText, isExpanded = false) {
   `;
 }
 
-function renderShell(title, body) {
+function renderHeader(title, copyValue, language = "", copyFeedback = "") {
+  return `
+    <div class="vocabai-popup__header-main">
+      <div class="vocabai-popup__title-row">
+        <div class="vocabai-popup__title">${escapeHtml(title)}</div>
+        ${renderCopyButton("word", copyValue, copyFeedback)}
+      </div>
+      ${
+        language
+          ? `<div class="vocabai-popup__language-badge">${escapeHtml(language)}</div>`
+          : ""
+      }
+    </div>
+  `;
+}
+
+function renderShell(title, body, { copyValue = "", language = "", wordCopyFeedback = "" } = {}) {
   return `
     <div class="vocabai-popup__header">
-      <div class="vocabai-popup__title">${escapeHtml(title)}</div>
+      ${renderHeader(title, copyValue, language, wordCopyFeedback)}
       <button type="button" class="vocabai-popup__close" aria-label="Close popup">x</button>
     </div>
     <div class="vocabai-popup__body">${body}</div>
@@ -121,7 +179,8 @@ function renderTranslateSection({
   translationState = "idle",
   translationMessage = "",
   translatedText = "",
-  showTranslate = true
+  showTranslate = true,
+  copyFeedback = ""
 } = {}) {
   if (!showTranslate) {
     return "";
@@ -148,7 +207,10 @@ function renderTranslateSection({
       </div>
       ${
         translatedText
-          ? renderField("Translation", translatedText)
+          ? renderField("Translation", translatedText, {
+            copyType: "translation",
+            copyFeedback
+          })
           : ""
       }
       ${
@@ -171,6 +233,7 @@ function getResultMarkup({
   selectedText,
   isExpanded,
   word,
+  language,
   meaning,
   synonyms,
   antonyms,
@@ -182,30 +245,43 @@ function getResultMarkup({
   saveMessage,
   isAuthenticated,
   allowSave,
-  showTranslate
+  showTranslate,
+  copyFeedback = {}
 }) {
   return renderShell(
     truncateText(word || "Selection"),
     [
       renderSelectionPreview(selectedText, isExpanded),
-      renderField("Meaning", meaning || "No meaning available."),
-      renderField(
-        "Synonyms",
-        Array.isArray(synonyms) && synonyms.length > 0 ? synonyms.join(", ") : "None"
-      ),
-      renderField(
-        "Antonyms",
-        Array.isArray(antonyms) && antonyms.length > 0 ? antonyms.join(", ") : "None"
-      ),
+      renderField("Meaning", meaning || "No meaning available.", {
+        copyType: "meaning",
+        copyValue: meaning || "",
+        copyFeedback: copyFeedback.meaning
+      }),
+      renderField("Synonyms", synonyms, {
+        copyType: "synonyms",
+        copyValue: synonyms,
+        copyFeedback: copyFeedback.synonyms
+      }),
+      renderField("Antonyms", antonyms, {
+        copyType: "antonyms",
+        copyValue: antonyms,
+        copyFeedback: copyFeedback.antonyms
+      }),
       renderTranslateSection({
         targetLang,
         translationState,
         translationMessage,
         translatedText,
-        showTranslate
+        showTranslate,
+        copyFeedback: copyFeedback.translation
       }),
       renderSaveSection({ saveState, saveMessage, isAuthenticated, allowSave })
-    ].join("")
+    ].join(""),
+    {
+      copyValue: word || "Selection",
+      language,
+      wordCopyFeedback: copyFeedback.word
+    }
   );
 }
 
