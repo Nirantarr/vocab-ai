@@ -1,8 +1,26 @@
 @import "tailwindcss";
 
 :root {
-  color: #ffffff;
-  background: #070812;
+  --bg-color: #070812;
+  --text-color: #ffffff;
+  --card-bg: rgba(2, 6, 23, 0.78);
+  --card-bg-soft: rgba(255, 255, 255, 0.04);
+  --input-bg: rgba(15, 23, 42, 0.42);
+  --input-bg-strong: rgba(15, 23, 42, 0.6);
+  --button-text: #ffffff;
+  --button-muted-text: rgba(255, 255, 255, 0.78);
+  --overlay-bg: rgba(2, 6, 23, 0.72);
+  --divider-color: rgba(255, 255, 255, 0.08);
+  --page-bg: #070812;
+  --page-bg-accent: rgba(20, 184, 166, 0.08);
+  --page-bg-warm: rgba(249, 115, 22, 0.1);
+  --surface-elevated: rgba(2, 6, 23, 0.78);
+  --surface-muted: rgba(15, 23, 42, 0.08);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --text-primary: #ffffff;
+  --text-muted: rgba(255, 255, 255, 0.72);
+  --text-soft: rgba(255, 255, 255, 0.55);
+  --scroll-track: #090b14;
   font-family: "Satoshi", "Segoe UI", sans-serif;
   line-height: 1.5;
   font-weight: 400;
@@ -10,6 +28,29 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+body.light-theme {
+  --bg-color: #f5f7fb;
+  --text-color: #0f172a;
+  --card-bg: rgba(255, 255, 255, 0.92);
+  --card-bg-soft: rgba(255, 255, 255, 0.88);
+  --input-bg: rgba(226, 232, 240, 0.95);
+  --input-bg-strong: rgba(226, 232, 240, 1);
+  --button-text: #0f172a;
+  --button-muted-text: rgba(15, 23, 42, 0.78);
+  --overlay-bg: rgba(148, 163, 184, 0.28);
+  --divider-color: rgba(15, 23, 42, 0.1);
+  --page-bg: #f5f7fb;
+  --page-bg-accent: rgba(14, 116, 144, 0.1);
+  --page-bg-warm: rgba(249, 115, 22, 0.08);
+  --surface-elevated: rgba(255, 255, 255, 0.88);
+  --surface-muted: rgba(15, 23, 42, 0.05);
+  --border-subtle: rgba(15, 23, 42, 0.1);
+  --text-primary: #0f172a;
+  --text-muted: rgba(15, 23, 42, 0.78);
+  --text-soft: rgba(15, 23, 42, 0.58);
+  --scroll-track: #d9e2f1;
 }
 
 html {
@@ -20,9 +61,83 @@ body {
   margin: 0;
   min-width: 320px;
   background:
-    radial-gradient(circle at top left, rgba(20, 184, 166, 0.08), transparent 28%),
-    radial-gradient(circle at bottom center, rgba(249, 115, 22, 0.1), transparent 25%),
-    #070812;
+    radial-gradient(circle at top left, var(--page-bg-accent), transparent 28%),
+    radial-gradient(circle at bottom center, var(--page-bg-warm), transparent 25%),
+    var(--page-bg);
+  color: var(--text-primary);
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+body,
+body button,
+body input,
+body textarea,
+body select {
+  color: var(--text-color);
+}
+
+body.light-theme .vocabai-popup,
+body.light-theme [class*="bg-white/[0.04]"],
+body.light-theme [class*="bg-white/[0.03]"],
+body.light-theme [class*="bg-white/[0.05]"],
+body.light-theme [class*="bg-slate-950/20"],
+body.light-theme [class*="bg-slate-950/30"],
+body.light-theme [class*="bg-slate-950/40"],
+body.light-theme [class*="bg-[#0d1020]/95"],
+body.light-theme [class*="bg-black/10"] {
+  background: var(--card-bg-soft) !important;
+}
+
+body.light-theme [class*="text-white"],
+body.light-theme [class*="text-white/"],
+body.light-theme [class*="text-cyan-100"] {
+  color: var(--text-color) !important;
+}
+
+body.light-theme [class*="text-white/45"],
+body.light-theme [class*="text-white/55"],
+body.light-theme [class*="text-white/60"],
+body.light-theme [class*="text-white/65"],
+body.light-theme [class*="text-white/70"],
+body.light-theme [class*="text-white/75"],
+body.light-theme [class*="text-white/80"],
+body.light-theme [class*="text-white/85"] {
+  color: var(--text-muted) !important;
+}
+
+body.light-theme [class*="text-white/25"],
+body.light-theme [class*="text-white/28"],
+body.light-theme [class*="text-white/30"],
+body.light-theme [class*="text-white/35"],
+body.light-theme [class*="text-white/38"] {
+  color: var(--text-soft) !important;
+}
+
+body.light-theme [class*="border-white/"],
+body.light-theme [class*="divide-white/"] {
+  border-color: var(--border-subtle) !important;
+}
+
+body.light-theme [class*="bg-slate-950/"],
+body.light-theme [class*="bg-white/"] {
+  background-color: var(--card-bg-soft) !important;
+}
+
+body.light-theme input,
+body.light-theme textarea,
+body.light-theme select {
+  background: var(--input-bg);
+  color: var(--text-color);
+  border-color: var(--border-subtle);
+}
+
+body.light-theme input::placeholder,
+body.light-theme textarea::placeholder {
+  color: var(--text-soft);
+}
+
+body.light-theme .fixed.inset-0.bg-slate-950\/70 {
+  background: var(--overlay-bg) !important;
 }
 
 a {
@@ -45,7 +160,7 @@ input {
 }
 
 ::-webkit-scrollbar-track {
-  background: #090b14;
+  background: var(--scroll-track);
 }
 
 ::-webkit-scrollbar-thumb {

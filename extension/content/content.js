@@ -7,14 +7,16 @@ window.VocabAIExtension = window.VocabAIExtension || {};
     LONG_TEXT_THRESHOLD,
     getErrorMarkup,
     getLoadingMarkup,
-    getResultMarkup
+    getResultMarkup,
+    getStatusMarkup
   } = window.VocabAIExtension.ui;
   const {
     initializePopupHandlers,
     renderPopup,
     removePopup,
     consumeSelectionSuppression,
-    currentPopupContains
+    currentPopupContains,
+    suppressSelectionOnce
   } = window.VocabAIExtension.popup;
   const { initializeSelectionListener } = window.VocabAIExtension.selection;
   let popupState = null;
@@ -34,8 +36,48 @@ window.VocabAIExtension = window.VocabAIExtension || {};
     return Boolean(popupState?.word && popupState?.rect);
   }
 
+  function isPopupInteraction(event) {
+    if (!event) {
+      return false;
+    }
+
+    if (currentPopupContains(event.target)) {
+      return true;
+    }
+
+    if (typeof event.composedPath === "function") {
+      return event.composedPath().some((node) => {
+        if (!node || typeof node !== "object") {
+          return false;
+        }
+
+        if (node.id === "vocabai-selection-popup") {
+          return true;
+        }
+
+        if (typeof node.classList?.contains === "function") {
+          return node.classList.contains("vocabai-popup");
+        }
+
+        return false;
+      });
+    }
+
+    return false;
+  }
+
   function isSingleWordSelection(value) {
     return /^[a-zA-Z][a-zA-Z'-]*$/.test(value);
+  }
+
+  function buildDefaultPopupRect() {
+    const viewportWidth = document.documentElement.clientWidth;
+    const defaultMargin = 12;
+    return {
+      left: Math.max(defaultMargin, Math.round((viewportWidth - 320) / 2)),
+      top: 24,
+      bottom: 64
+    };
   }
 
   function renderCurrentPopup() {
@@ -65,14 +107,47 @@ window.VocabAIExtension = window.VocabAIExtension || {};
       }),
       popupState.rect,
       {
-        wide: popupState.isLongSelection
+        wide: popupState.isLongSelection,
+        preservePosition: true
       }
     );
 
     bindPreviewToggle();
+    bindScanImageButton();
+    bindPasteImageButton();
     bindCopyButtons();
     bindTranslateControls();
     bindSaveButton();
+  }
+
+  function bindScanImageButton() {
+    const scanButton = document.querySelector(".vocabai-popup__scan-image");
+    const imageScan = window.VocabAIExtension.imageScan;
+
+    if (!scanButton || !imageScan?.openImagePicker) {
+      return;
+    }
+
+    scanButton.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      imageScan.openImagePicker();
+    };
+  }
+
+  function bindPasteImageButton() {
+    const pasteButton = document.querySelector(".vocabai-popup__paste-image");
+    const imageScan = window.VocabAIExtension.imageScan;
+
+    if (!pasteButton || !imageScan?.armPasteCapture) {
+      return;
+    }
+
+    pasteButton.onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      imageScan.armPasteCapture();
+    };
   }
 
   async function copyToClipboard(text) {
@@ -156,9 +231,16 @@ window.VocabAIExtension = window.VocabAIExtension || {};
       return;
     }
 
+    toggleButton.onmousedown = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressSelectionOnce();
+    };
+
     toggleButton.onclick = (event) => {
       event.preventDefault();
       event.stopPropagation();
+      suppressSelectionOnce();
 
       popupState = {
         ...popupState,
@@ -204,6 +286,80 @@ window.VocabAIExtension = window.VocabAIExtension || {};
         reject(error);
       }
     });
+  }
+
+  async function loadAnalysisFromText(text, rect) {
+    renderPopup(getLoadingMarkup(text), rect, {
+      wide: text.length > LONG_TEXT_THRESHOLD
+    });
+
+    try {
+      const [data, authenticated, targetLang] = await Promise.all([
+        fetchWordDetails(text),
+        getAuthStatus(),
+        getStoredTargetLanguage()
+      ]);
+
+      console.log("VocabAI received word data:", data);
+
+      popupState = {
+        selectedText: text,
+        rect,
+        word: data.word,
+        language: data.language || "",
+        meaning: data.meaning,
+        synonyms: Array.isArray(data.synonyms) ? data.synonyms : [],
+        antonyms: Array.isArray(data.antonyms) ? data.antonyms : [],
+        targetLang,
+        translationState: "idle",
+        translationMessage: "",
+        translatedText: "",
+        saveState: "idle",
+        saveMessage: "",
+        isAuthenticated: authenticated,
+        allowSave: isSingleWordSelection(text),
+        showTranslate: true,
+        isLongSelection: text.length > LONG_TEXT_THRESHOLD,
+        isExpanded: false,
+        copyFeedback: {}
+      };
+      renderCurrentPopup();
+    } catch (_error) {
+      const targetLang = await getStoredTargetLanguage().catch(() => DEFAULT_TARGET_LANG);
+      const authenticated = await getAuthStatus().catch(() => false);
+
+      console.log("VocabAI received fallback data for selection:", {
+        word: text,
+        language: "",
+        meaning: "Meaning is unavailable for this selection.",
+        synonyms: [],
+        antonyms: []
+      });
+
+      popupState = {
+        selectedText: text,
+        rect,
+        word: text,
+        language: "",
+        meaning: "Meaning is unavailable for this selection.",
+        synonyms: [],
+        antonyms: [],
+        targetLang,
+        translationState: "idle",
+        translationMessage: "",
+        translatedText: "",
+        saveState: "idle",
+        saveMessage: "",
+        isAuthenticated: authenticated,
+        allowSave: false,
+        showTranslate: true,
+        isLongSelection: text.length > LONG_TEXT_THRESHOLD,
+        isExpanded: false,
+        copyFeedback: {}
+      };
+
+      renderCurrentPopup();
+    }
   }
 
   function saveWordDetails(wordData) {
@@ -527,83 +683,29 @@ window.VocabAIExtension = window.VocabAIExtension || {};
     }
 
     const { text, rect } = selection;
-    renderPopup(getLoadingMarkup(text), rect, {
-      wide: text.length > LONG_TEXT_THRESHOLD
-    });
-
-    try {
-      const [data, authenticated, targetLang] = await Promise.all([
-        fetchWordDetails(text),
-        getAuthStatus(),
-        getStoredTargetLanguage()
-      ]);
-
-      console.log("VocabAI received word data:", data);
-
-      popupState = {
-        selectedText: text,
-        rect,
-        word: data.word,
-        language: data.language || "",
-        meaning: data.meaning,
-        synonyms: Array.isArray(data.synonyms) ? data.synonyms : [],
-        antonyms: Array.isArray(data.antonyms) ? data.antonyms : [],
-        targetLang,
-        translationState: "idle",
-        translationMessage: "",
-        translatedText: "",
-        saveState: "idle",
-        saveMessage: "",
-        isAuthenticated: authenticated,
-        allowSave: isSingleWordSelection(text),
-        showTranslate: true,
-        isLongSelection: text.length > LONG_TEXT_THRESHOLD,
-        isExpanded: false,
-        copyFeedback: {}
-      };
-      renderCurrentPopup();
-    } catch (_error) {
-      const targetLang = await getStoredTargetLanguage().catch(() => DEFAULT_TARGET_LANG);
-      const authenticated = await getAuthStatus().catch(() => false);
-
-      console.log("VocabAI received fallback data for selection:", {
-        word: text,
-        language: "",
-        meaning: "Meaning is unavailable for this selection.",
-        synonyms: [],
-        antonyms: []
-      });
-
-      popupState = {
-        selectedText: text,
-        rect,
-        word: text,
-        language: "",
-        meaning: "Meaning is unavailable for this selection.",
-        synonyms: [],
-        antonyms: [],
-        targetLang,
-        translationState: "idle",
-        translationMessage: "",
-        translatedText: "",
-        saveState: "idle",
-        saveMessage: "",
-        isAuthenticated: authenticated,
-        allowSave: false,
-        showTranslate: true,
-        isLongSelection: text.length > LONG_TEXT_THRESHOLD,
-        isExpanded: false,
-        copyFeedback: {}
-      };
-
-      renderCurrentPopup();
-    }
+    await loadAnalysisFromText(text, rect);
   }
 
   initializePopupHandlers();
   initializeSelectionListener({
     onSelection: handleSelection,
     shouldIgnoreSelection: (event) =>
-      consumeSelectionSuppression() || currentPopupContains(event?.target)
+      consumeSelectionSuppression() || isPopupInteraction(event)
   });
+
+  window.VocabAIExtension.contentActions = {
+    analyzeTextInput: async (text) => {
+      if (typeof text !== "string" || !text.trim()) {
+        return;
+      }
+
+      await loadAnalysisFromText(text.trim(), buildDefaultPopupRect());
+    },
+    showOcrLoading: (label = "Scanning image...") => {
+      renderPopup(getLoadingMarkup(label), buildDefaultPopupRect(), { wide: true });
+    },
+    showOcrError: (message = "OCR failed") => {
+      renderPopup(getStatusMarkup("OCR Error", message, true), buildDefaultPopupRect(), { wide: true });
+    }
+  };
 })();

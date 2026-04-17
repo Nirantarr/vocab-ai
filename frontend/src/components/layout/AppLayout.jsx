@@ -5,7 +5,10 @@ import Footer from './Footer'
 
 export default function AppLayout() {
   return (
-    <div className="min-h-screen bg-[#070812] text-white">
+    <div
+      className="min-h-screen transition-colors duration-300"
+      style={{ backgroundColor: "var(--page-bg)", color: "var(--text-primary)" }}
+    >
       <BackgroundGlow />
       <Navbar />
       <main>

@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, NavLink } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import Logo from './Logo'
+import { initTheme } from '../../services/theme'
 
 const navLinks = [
   { label: 'Features', href: '/#features' },
@@ -15,23 +16,32 @@ export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
   const { user, isAuthenticated, logout } = useAuth()
 
+  useEffect(() => initTheme(), [])
+
   const closeMenu = () => setIsOpen(false)
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/8 bg-slate-950/70 backdrop-blur-xl">
+    <header
+      className="sticky top-0 z-50 backdrop-blur-xl"
+      style={{
+        borderBottom: "1px solid var(--border-subtle)",
+        backgroundColor: "var(--surface-elevated)",
+        color: "var(--text-primary)",
+      }}
+    >
       <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 lg:px-10">
         <Link to="/" onClick={closeMenu}>
           <Logo />
         </Link>
 
-        <nav className="hidden items-center gap-8 text-sm font-medium text-white/55 lg:flex">
+        <nav className="hidden items-center gap-8 text-sm font-medium lg:flex" style={{ color: "var(--text-soft)" }}>
           {navLinks.map((link) =>
             link.href.startsWith('/#') ? (
-              <a key={link.label} href={link.href} className="transition hover:text-white">
+              <a key={link.label} href={link.href} className="transition hover:opacity-100" style={{ color: "inherit" }}>
                 {link.label}
               </a>
             ) : (
-              <NavLink key={link.label} to={link.href} className="transition hover:text-white">
+              <NavLink key={link.label} to={link.href} className="transition hover:opacity-100" style={{ color: "inherit" }}>
                 {link.label}
               </NavLink>
             )
@@ -39,15 +49,38 @@ export default function Navbar() {
         </nav>
 
         <div className="hidden items-center gap-3 lg:flex">
+          <button
+            id="themeToggle"
+            type="button"
+            className="rounded-xl border px-3 py-2 text-sm font-semibold transition"
+            style={{
+              borderColor: "var(--border-subtle)",
+              color: "var(--text-primary)",
+              backgroundColor: "var(--surface-muted)",
+            }}
+          >
+            🌙
+          </button>
           {isAuthenticated ? (
             <>
-              <div className="rounded-xl border border-cyan-300/15 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-100">
+              <div
+                className="rounded-xl px-4 py-2 text-sm font-medium"
+                style={{
+                  border: "1px solid var(--border-subtle)",
+                  backgroundColor: "var(--surface-muted)",
+                  color: "var(--text-primary)",
+                }}
+              >
                 {user.email}
               </div>
               <button
                 type="button"
                 onClick={logout}
-                className="rounded-xl border border-white/10 px-5 py-2.5 text-sm font-semibold text-white/80 transition hover:border-cyan-400/40 hover:text-white"
+                className="rounded-xl border px-5 py-2.5 text-sm font-semibold transition hover:opacity-100"
+                style={{
+                  borderColor: "var(--border-subtle)",
+                  color: "var(--button-muted-text)",
+                }}
               >
                 Log out
               </button>
@@ -56,7 +89,11 @@ export default function Navbar() {
             <>
               <Link
                 to="/login"
-                className="rounded-xl border border-white/10 px-5 py-2.5 text-sm font-semibold text-white/80 transition hover:border-cyan-400/40 hover:text-white"
+                className="rounded-xl border px-5 py-2.5 text-sm font-semibold transition hover:opacity-100"
+                style={{
+                  borderColor: "var(--border-subtle)",
+                  color: "var(--button-muted-text)",
+                }}
               >
                 Log in
               </Link>
@@ -73,7 +110,8 @@ export default function Navbar() {
         <button
           type="button"
           onClick={() => setIsOpen((open) => !open)}
-          className="rounded-xl border border-white/10 p-2 text-white lg:hidden"
+          className="rounded-xl border p-2 lg:hidden"
+          style={{ borderColor: "var(--border-subtle)", color: "var(--text-primary)" }}
           aria-label="Toggle navigation"
         >
           <span className="block h-0.5 w-5 bg-current" />
@@ -83,7 +121,14 @@ export default function Navbar() {
       </div>
 
       {isOpen ? (
-        <div className="border-t border-white/8 bg-slate-950/95 px-6 py-4 lg:hidden">
+        <div
+          className="px-6 py-4 lg:hidden"
+          style={{
+            borderTop: "1px solid var(--border-subtle)",
+            backgroundColor: "var(--surface-elevated)",
+            color: "var(--text-primary)",
+          }}
+        >
           <div className="flex flex-col gap-4">
             {navLinks.map((link) =>
               link.href.startsWith('/#') ? (
@@ -91,7 +136,8 @@ export default function Navbar() {
                   key={link.label}
                   href={link.href}
                   onClick={closeMenu}
-                  className="text-sm font-medium text-white/70 transition hover:text-white"
+                  className="text-sm font-medium transition hover:opacity-100"
+                  style={{ color: "var(--text-muted)" }}
                 >
                   {link.label}
                 </a>
@@ -100,7 +146,8 @@ export default function Navbar() {
                   key={link.label}
                   to={link.href}
                   onClick={closeMenu}
-                  className="text-sm font-medium text-white/70 transition hover:text-white"
+                  className="text-sm font-medium transition hover:opacity-100"
+                  style={{ color: "var(--text-muted)" }}
                 >
                   {link.label}
                 </NavLink>
@@ -110,7 +157,14 @@ export default function Navbar() {
             <div className="mt-2 flex gap-3">
               {isAuthenticated ? (
                 <>
-                  <div className="flex-1 rounded-xl border border-cyan-300/15 bg-cyan-400/10 px-4 py-2.5 text-center text-sm font-medium text-cyan-100">
+                  <div
+                    className="flex-1 rounded-xl px-4 py-2.5 text-center text-sm font-medium"
+                    style={{
+                      border: "1px solid var(--border-subtle)",
+                      backgroundColor: "var(--surface-muted)",
+                      color: "var(--text-primary)",
+                    }}
+                  >
                     {user.email}
                   </div>
                   <button
@@ -119,7 +173,11 @@ export default function Navbar() {
                       logout()
                       closeMenu()
                     }}
-                    className="flex-1 rounded-xl border border-white/10 px-4 py-2.5 text-sm font-semibold text-white"
+                    className="flex-1 rounded-xl border px-4 py-2.5 text-sm font-semibold"
+                    style={{
+                      borderColor: "var(--border-subtle)",
+                      color: "var(--button-muted-text)",
+                    }}
                   >
                     Log out
                   </button>
@@ -129,7 +187,11 @@ export default function Navbar() {
                   <Link
                     to="/login"
                     onClick={closeMenu}
-                    className="flex-1 rounded-xl border border-white/10 px-4 py-2.5 text-center text-sm font-semibold text-white/80"
+                    className="flex-1 rounded-xl border px-4 py-2.5 text-center text-sm font-semibold"
+                    style={{
+                      borderColor: "var(--border-subtle)",
+                      color: "var(--button-muted-text)",
+                    }}
                   >
                     Log in
                   </Link>

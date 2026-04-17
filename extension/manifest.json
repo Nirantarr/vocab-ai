@@ -4,10 +4,17 @@
   "version": "1.0.0",
   "description": "Shows a floating meaning card for selected text using backend data.",
   "permissions": ["activeTab", "storage", "scripting"],
-  "host_permissions": ["http://localhost:5000/*"],
+  "host_permissions": [
+    "http://localhost:5000/*",
+    "https://cdn.jsdelivr.net/*",
+    "https://tessdata.projectnaptha.com/*"
+  ],
   "background": {
     "service_worker": "background/background.js",
     "type": "module"
+  },
+  "sandbox": {
+    "pages": ["sandbox/ocr.html"]
   },
   "content_scripts": [
     {
@@ -17,11 +24,22 @@
         "content/ui.js",
         "content/popup.js",
         "content/selection.js",
-        "content/content.js"
+        "content/content.js",
+        "utils/ocr.js",
+        "content/imageScan.js"
       ],
       "run_at": "document_idle"
     }
   ],
+  "web_accessible_resources": [
+    {
+      "resources": ["sandbox/ocr.html", "sandbox/ocr.js"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "content_security_policy": {
+    "sandbox": "sandbox allow-scripts; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; child-src 'self' blob: https://cdn.jsdelivr.net; connect-src https://cdn.jsdelivr.net https://tessdata.projectnaptha.com;"
+  },
   "externally_connectable": {
     "matches": ["http://localhost:5173/*"]
   }

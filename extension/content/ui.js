@@ -46,7 +46,6 @@ function normalizeListText(value) {
 
 function renderCopyButton(copyType, copyValue, copyFeedback = "") {
   const normalizedCopyValue = normalizeListText(copyValue);
-
   const buttonLabel = copyFeedback || "Copy";
 
   return `
@@ -83,8 +82,28 @@ function truncateText(value, limit = PREVIEW_LIMIT) {
   return `${value.slice(0, limit).trimEnd()}...`;
 }
 
-function renderSelectionPreview(selectedText, isExpanded = false) {
-  if (typeof selectedText !== "string" || selectedText.length <= LONG_TEXT_THRESHOLD) {
+function isSingleWordText(value) {
+  return typeof value === "string" && /^\S+$/.test(value.trim());
+}
+
+function shouldShowSelectionPreview(selectedText, word) {
+  if (typeof selectedText !== "string" || !selectedText.trim()) {
+    return false;
+  }
+
+  if (selectedText.length > LONG_TEXT_THRESHOLD) {
+    return true;
+  }
+
+  if (!isSingleWordText(selectedText)) {
+    return true;
+  }
+
+  return selectedText.trim() !== String(word || "").trim();
+}
+
+function renderSelectionPreview(selectedText, word, isExpanded = false) {
+  if (!shouldShowSelectionPreview(selectedText, word)) {
     return "";
   }
 
@@ -106,6 +125,14 @@ function renderSelectionPreview(selectedText, isExpanded = false) {
   `;
 }
 
+function getPopupTitle(word, selectedText) {
+  if (shouldShowSelectionPreview(selectedText, word)) {
+    return truncateText(selectedText);
+  }
+
+  return truncateText(word || "Selection");
+}
+
 function renderHeader(title, copyValue, language = "", copyFeedback = "") {
   return `
     <div class="vocabai-popup__header-main">
@@ -122,13 +149,20 @@ function renderHeader(title, copyValue, language = "", copyFeedback = "") {
   `;
 }
 
-function renderShell(title, body, { copyValue = "", language = "", wordCopyFeedback = "" } = {}) {
+function renderShell(
+  title,
+  body,
+  footer = "",
+  { copyValue = "", language = "", wordCopyFeedback = "" } = {}
+) {
   return `
-    <div class="vocabai-popup__header">
+    <div class="vocabai-popup__header popup-header">
       ${renderHeader(title, copyValue, language, wordCopyFeedback)}
       <button type="button" class="vocabai-popup__close" aria-label="Close popup">x</button>
     </div>
     <div class="vocabai-popup__body">${body}</div>
+    <div class="vocabai-popup__footer">${footer}</div>
+    <div class="resize-handle" aria-hidden="true"></div>
   `;
 }
 
@@ -149,7 +183,7 @@ function renderSaveSection({
     : "Login to Save";
 
   return `
-    <div class="vocabai-popup__actions">
+    <div class="vocabai-popup__footer-block vocabai-popup__actions">
       <button
         type="button"
         class="vocabai-popup__save"
@@ -162,6 +196,18 @@ function renderSaveSection({
           ? `<div class="vocabai-popup__status ${saveState === "error" ? "vocabai-popup__status--error" : ""}">${escapeHtml(saveMessage)}</div>`
           : ""
       }
+    </div>
+  `;
+}
+
+function renderOcrSection() {
+  return `
+    <div class="vocabai-popup__footer-block vocabai-popup__actions">
+      <div class="vocabai-popup__ocr-actions">
+        <button type="button" class="vocabai-popup__scan-image">Scan Image</button>
+        <button type="button" class="vocabai-popup__paste-image">Paste Screenshot</button>
+      </div>
+      <div class="vocabai-popup__hint">Press Win + Shift + S, then Ctrl + V to scan text from screen.</div>
     </div>
   `;
 }
@@ -183,7 +229,7 @@ function renderTranslateSection({
   copyFeedback = ""
 } = {}) {
   if (!showTranslate) {
-    return "";
+    return { body: "", footer: "" };
   }
 
   const isTranslating = translationState === "loading";
@@ -191,41 +237,59 @@ function renderTranslateSection({
     ? "Translation failed"
     : translationMessage;
 
-  return `
-    <div class="vocabai-popup__translate">
-      <div class="vocabai-popup__translate-controls">
-        <select class="vocabai-popup__select" aria-label="Select target language">
-          ${renderLanguageOptions(targetLang)}
-        </select>
-        <button
-          type="button"
-          class="vocabai-popup__translate-button"
-          ${isTranslating ? "disabled" : ""}
-        >
-          ${isTranslating ? "Translating..." : "Translate"}
-        </button>
+  return {
+    body: `
+      <div class="vocabai-popup__translate-results">
+        ${
+          translatedText
+            ? renderField("Translation", translatedText, {
+              copyType: "translation",
+              copyFeedback
+            })
+            : ""
+        }
+        ${
+          statusMessage
+            ? `<div class="vocabai-popup__status ${translationState === "error" ? "vocabai-popup__status--error" : ""}">${escapeHtml(statusMessage)}</div>`
+            : ""
+        }
       </div>
-      ${
-        translatedText
-          ? renderField("Translation", translatedText, {
-            copyType: "translation",
-            copyFeedback
-          })
-          : ""
-      }
-      ${
-        statusMessage
-          ? `<div class="vocabai-popup__status ${translationState === "error" ? "vocabai-popup__status--error" : ""}">${escapeHtml(statusMessage)}</div>`
-          : ""
-      }
-    </div>
-  `;
+    `,
+    footer: `
+      <div class="vocabai-popup__footer-block vocabai-popup__translate">
+        <div class="vocabai-popup__translate-controls">
+          <select class="vocabai-popup__select" aria-label="Select target language">
+            ${renderLanguageOptions(targetLang)}
+          </select>
+          <button
+            type="button"
+            class="vocabai-popup__translate-button"
+            ${isTranslating ? "disabled" : ""}
+          >
+            ${isTranslating ? "Translating..." : "Translate"}
+          </button>
+        </div>
+      </div>
+    `
+  };
 }
 
 function getLoadingMarkup(word) {
   return renderShell(
     word || "Selection",
-    '<div class="vocabai-popup__status">Loading...</div>'
+    `
+      <div class="vocabai-popup__loader">
+        <span class="vocabai-popup__spinner" aria-hidden="true"></span>
+        <span class="vocabai-popup__status">Loading...</span>
+      </div>
+    `
+  );
+}
+
+function getStatusMarkup(title, message, isError = false) {
+  return renderShell(
+    title || "Status",
+    `<div class="vocabai-popup__status ${isError ? "vocabai-popup__status--error" : ""}">${escapeHtml(message)}</div>`
   );
 }
 
@@ -248,10 +312,19 @@ function getResultMarkup({
   showTranslate,
   copyFeedback = {}
 }) {
+  const translationSection = renderTranslateSection({
+    targetLang,
+    translationState,
+    translationMessage,
+    translatedText,
+    showTranslate,
+    copyFeedback: copyFeedback.translation
+  });
+
   return renderShell(
-    truncateText(word || "Selection"),
+    getPopupTitle(word, selectedText),
     [
-      renderSelectionPreview(selectedText, isExpanded),
+      renderSelectionPreview(selectedText, word, isExpanded),
       renderField("Meaning", meaning || "No meaning available.", {
         copyType: "meaning",
         copyValue: meaning || "",
@@ -267,18 +340,15 @@ function getResultMarkup({
         copyValue: antonyms,
         copyFeedback: copyFeedback.antonyms
       }),
-      renderTranslateSection({
-        targetLang,
-        translationState,
-        translationMessage,
-        translatedText,
-        showTranslate,
-        copyFeedback: copyFeedback.translation
-      }),
+      translationSection.body
+    ].join(""),
+    [
+      translationSection.footer,
+      renderOcrSection(),
       renderSaveSection({ saveState, saveMessage, isAuthenticated, allowSave })
     ].join(""),
     {
-      copyValue: word || "Selection",
+      copyValue: selectedText || word || "Selection",
       language,
       wordCopyFeedback: copyFeedback.word
     }
@@ -298,5 +368,6 @@ window.VocabAIExtension.ui = {
   LONG_TEXT_THRESHOLD,
   getErrorMarkup,
   getLoadingMarkup,
-  getResultMarkup
+  getResultMarkup,
+  getStatusMarkup
 };
