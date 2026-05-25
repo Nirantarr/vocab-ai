@@ -22,6 +22,11 @@ const wordSchema = new mongoose.Schema(
       type: [String],
       default: [],
     },
+    relationFetchStatus: {
+      type: String,
+      enum: ['idle', 'loading', 'complete'],
+      default: 'idle',
+    },
     createdAt: {
       type: Date,
       default: Date.now,

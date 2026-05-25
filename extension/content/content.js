@@ -5,22 +5,40 @@ window.VocabAIExtension = window.VocabAIExtension || {};
     DEFAULT_TARGET_LANG,
     LANGUAGE_OPTIONS,
     LONG_TEXT_THRESHOLD,
-    getErrorMarkup,
-    getLoadingMarkup,
-    getResultMarkup,
-    getStatusMarkup
+    normalizeRelationStatus
   } = window.VocabAIExtension.ui;
   const {
     initializePopupHandlers,
-    renderPopup,
+    getPopupRefs,
     removePopup,
+    setCloseHandler,
+    showPopup,
     consumeSelectionSuppression,
     currentPopupContains,
-    suppressSelectionOnce
+    suppressSelectionOnce,
+    setHidden,
+    setText
   } = window.VocabAIExtension.popup;
   const { initializeSelectionListener } = window.VocabAIExtension.selection;
+
+  const RELATION_POLL_INTERVAL_MS = 1200;
+  const RELATION_POLL_MAX_ATTEMPTS = 6;
+
   let popupState = null;
+  let popupRefs = null;
+  let listenersBound = false;
+  let relationPollTimeoutId = null;
+  let selectionRequestController = null;
+  let translationRequestController = null;
   const copyResetTimers = {};
+
+  function ensurePopupRefs() {
+    if (!popupRefs || !popupRefs.popup || !document.body.contains(popupRefs.popup)) {
+      popupRefs = getPopupRefs();
+    }
+
+    return popupRefs;
+  }
 
   function getAllowedLanguage(value) {
     return LANGUAGE_OPTIONS.some((option) => option.value === value)
@@ -73,6 +91,7 @@ window.VocabAIExtension = window.VocabAIExtension || {};
   function buildDefaultPopupRect() {
     const viewportWidth = document.documentElement.clientWidth;
     const defaultMargin = 12;
+
     return {
       left: Math.max(defaultMargin, Math.round((viewportWidth - 320) / 2)),
       top: 24,
@@ -80,74 +99,374 @@ window.VocabAIExtension = window.VocabAIExtension || {};
     };
   }
 
-  function renderCurrentPopup() {
-    if (!hasActivePopupState()) {
+  function normalizeList(values) {
+    return Array.isArray(values)
+      ? values.filter((value) => typeof value === "string" && value.trim())
+      : [];
+  }
+
+  function formatList(values) {
+    const normalizedValues = normalizeList(values);
+    return normalizedValues.length ? normalizedValues.join(", ") : "No data available";
+  }
+
+  function setCopyButtonState(button, copyType, value, feedback = "", hidden = false) {
+    if (!button) {
       return;
     }
 
-    renderPopup(
-      getResultMarkup({
-        selectedText: popupState.selectedText,
-        isExpanded: popupState.isExpanded,
-        word: popupState.word,
-        language: popupState.language,
-        meaning: popupState.meaning,
-        synonyms: popupState.synonyms,
-        antonyms: popupState.antonyms,
-        targetLang: popupState.targetLang,
-        translationState: popupState.translationState,
-        translationMessage: popupState.translationMessage,
-        translatedText: popupState.translatedText,
-        saveState: popupState.saveState,
-        saveMessage: popupState.saveMessage,
-        isAuthenticated: popupState.isAuthenticated,
-        allowSave: popupState.allowSave,
-        showTranslate: popupState.showTranslate,
-        copyFeedback: popupState.copyFeedback
-      }),
-      popupState.rect,
-      {
-        wide: popupState.isLongSelection,
-        preservePosition: true
-      }
+    const normalizedValue = Array.isArray(value) ? formatList(value) : String(value || "").trim();
+    button.dataset.copyType = copyType;
+    button.dataset.copyValue = normalizedValue || "No data available";
+    button.textContent = feedback || "Copy";
+    button.hidden = Boolean(hidden);
+  }
+
+  function updateTextBlock(element, value, { loading = false, error = false } = {}) {
+    if (!element) {
+      return;
+    }
+
+    element.textContent = value;
+    element.classList.toggle("vocabai-popup__value--loading", Boolean(loading));
+    element.classList.toggle("vocabai-popup__status--error", Boolean(error));
+  }
+
+  function updateStatusBlock(element, message, { hidden = false, error = false } = {}) {
+    if (!element) {
+      return;
+    }
+
+    element.hidden = Boolean(hidden || !message);
+    element.textContent = message || "";
+    element.classList.toggle("vocabai-popup__status--error", Boolean(error));
+  }
+
+  function getSelectionPreviewText() {
+    if (!popupState?.selectedText) {
+      return "";
+    }
+
+    if (!shouldShowSelectionPreview()) {
+      return popupState.selectedText;
+    }
+
+    if (
+      popupState.selectedText.length > 120 &&
+      !popupState.isExpanded
+    ) {
+      return `${popupState.selectedText.slice(0, 120).trimEnd()}...`;
+    }
+
+    return popupState.selectedText;
+  }
+
+  function shouldShowSelectionPreview() {
+    if (!popupState?.selectedText?.trim()) {
+      return false;
+    }
+
+    if (popupState.selectedText.length > LONG_TEXT_THRESHOLD) {
+      return true;
+    }
+
+    if (!/^\S+$/.test(popupState.selectedText.trim())) {
+      return true;
+    }
+
+    return popupState.selectedText.trim() !== String(popupState.word || "").trim();
+  }
+
+  function getPopupTitle() {
+    const text = shouldShowSelectionPreview()
+      ? popupState.selectedText
+      : popupState.word || "Selection";
+
+    if (typeof text !== "string" || text.length <= 120) {
+      return text;
+    }
+
+    return `${text.slice(0, 120).trimEnd()}...`;
+  }
+
+  function renderSelectionPreview() {
+    const refs = ensurePopupRefs();
+    const shouldShow = shouldShowSelectionPreview();
+    setHidden(refs.selectionField, !shouldShow);
+
+    if (!shouldShow) {
+      return;
+    }
+
+    updateTextBlock(refs.selectionValue, getSelectionPreviewText());
+    const canToggle = popupState.selectedText.length > 120;
+    refs.previewToggle.hidden = !canToggle;
+    refs.previewToggle.textContent = popupState.isExpanded ? "Show Less" : "Show More";
+  }
+
+  function renderList(container, data, status) {
+    if (!container) {
+      return;
+    }
+
+    const refs = ensurePopupRefs();
+    const relationValues = normalizeList(data);
+    const normalizedStatus = normalizeRelationStatus(status);
+    const sectionKey = container.dataset.relationSection;
+    const valueElement = sectionKey === "synonyms" ? refs.synonymsValue : refs.antonymsValue;
+    const copyButton = sectionKey === "synonyms" ? refs.synonymsCopyButton : refs.antonymsCopyButton;
+    const copyFeedback = popupState?.copyFeedback?.[sectionKey] || "";
+
+    if (normalizedStatus === "loading") {
+      updateTextBlock(valueElement, "Loading...", { loading: true });
+      setCopyButtonState(copyButton, sectionKey, relationValues, copyFeedback, true);
+      return;
+    }
+
+    if (!relationValues.length) {
+      updateTextBlock(valueElement, "No data available");
+      setCopyButtonState(copyButton, sectionKey, relationValues, copyFeedback, true);
+      return;
+    }
+
+    updateTextBlock(valueElement, relationValues.join(", "));
+    setCopyButtonState(copyButton, sectionKey, relationValues, copyFeedback, false);
+  }
+
+  function renderMeaning() {
+    const refs = ensurePopupRefs();
+    updateTextBlock(
+      refs.meaningValue,
+      popupState?.meaning || "No meaning available."
+    );
+    setCopyButtonState(
+      refs.meaningCopyButton,
+      "meaning",
+      popupState?.meaning || "",
+      popupState?.copyFeedback?.meaning || "",
+      false
+    );
+  }
+
+  function renderTranslation() {
+    const refs = ensurePopupRefs();
+    const translatedText = popupState?.translatedText || "";
+    const state = popupState?.translationState || "idle";
+    const statusMessage = state === "error"
+      ? "Translation failed"
+      : popupState?.translationMessage || "";
+
+    setHidden(refs.translationResults, !translatedText && !statusMessage);
+    setHidden(refs.translationField, !translatedText);
+    updateStatusBlock(
+      refs.translationStatus,
+      statusMessage,
+      { hidden: !statusMessage, error: state === "error" }
     );
 
-    bindPreviewToggle();
-    bindScanImageButton();
-    bindPasteImageButton();
-    bindCopyButtons();
-    bindTranslateControls();
-    bindSaveButton();
+    if (translatedText) {
+      updateTextBlock(refs.translationValue, translatedText);
+      setCopyButtonState(
+        refs.translationCopyButton,
+        "translation",
+        translatedText,
+        popupState?.copyFeedback?.translation || "",
+        false
+      );
+    } else {
+      setCopyButtonState(
+        refs.translationCopyButton,
+        "translation",
+        "",
+        popupState?.copyFeedback?.translation || "",
+        true
+      );
+    }
+
+    refs.translateSelect.value = getAllowedLanguage(popupState?.targetLang);
+    refs.translateButton.disabled = state === "loading";
+    refs.translateButton.textContent = state === "loading" ? "Translating..." : "Translate";
   }
 
-  function bindScanImageButton() {
-    const scanButton = document.querySelector(".vocabai-popup__scan-image");
-    const imageScan = window.VocabAIExtension.imageScan;
+  function renderSaveSection() {
+    const refs = ensurePopupRefs();
+    const allowSave = Boolean(popupState?.allowSave);
+    setHidden(refs.saveBlock, !allowSave);
 
-    if (!scanButton || !imageScan?.openImagePicker) {
+    if (!allowSave) {
       return;
     }
 
-    scanButton.onclick = (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      imageScan.openImagePicker();
-    };
+    const saveState = popupState?.saveState || "idle";
+    const isAuthenticated = Boolean(popupState?.isAuthenticated);
+    const isSaved = saveState === "saved";
+    const isSaving = saveState === "saving";
+
+    refs.saveButton.disabled = isAuthenticated && (isSaved || isSaving);
+    refs.saveButton.textContent = isAuthenticated
+      ? (isSaved ? "Saved" : isSaving ? "Saving..." : "Save Word")
+      : "Login to Save";
+
+    updateStatusBlock(
+      refs.saveStatus,
+      popupState?.saveMessage || "",
+      {
+        hidden: !popupState?.saveMessage,
+        error: saveState === "error"
+      }
+    );
   }
 
-  function bindPasteImageButton() {
-    const pasteButton = document.querySelector(".vocabai-popup__paste-image");
-    const imageScan = window.VocabAIExtension.imageScan;
+  function renderHeader() {
+    const refs = ensurePopupRefs();
+    setText(refs.title, getPopupTitle());
+    setCopyButtonState(
+      refs.wordCopyButton,
+      "word",
+      popupState?.selectedText || popupState?.word || "Selection",
+      popupState?.copyFeedback?.word || "",
+      false
+    );
 
-    if (!pasteButton || !imageScan?.armPasteCapture) {
+    if (popupState?.language) {
+      setText(refs.languageBadge, popupState.language);
+      setHidden(refs.languageBadge, false);
+    } else {
+      setHidden(refs.languageBadge, true);
+    }
+  }
+
+  function renderStatusSection({ loading = false, message = "", error = false } = {}) {
+    const refs = ensurePopupRefs();
+    setHidden(refs.statusSection, !loading && !message);
+    setHidden(refs.loader, !loading);
+    if (loading) {
+      setText(refs.loaderText, message || "Loading...");
+    }
+
+    updateStatusBlock(refs.statusMessage, message, {
+      hidden: loading || !message,
+      error
+    });
+  }
+
+  function renderRelations() {
+    const refs = ensurePopupRefs();
+    renderList(refs.synonymsField, popupState?.synonyms, popupState?.relationFetchStatus);
+    renderList(refs.antonymsField, popupState?.antonyms, popupState?.relationFetchStatus);
+  }
+
+  function renderStaticSections() {
+    const refs = ensurePopupRefs();
+    refs.translateSelect.innerHTML = LANGUAGE_OPTIONS.map(({ label, value }) => `
+      <option value="${value}">${label}</option>
+    `).join("");
+  }
+
+  function renderWordDetails() {
+    renderHeader();
+    renderSelectionPreview();
+    renderMeaning();
+    renderRelations();
+    renderTranslation();
+    renderSaveSection();
+    renderStatusSection();
+  }
+
+  function bindPopupListeners() {
+    if (listenersBound) {
       return;
     }
 
-    pasteButton.onclick = (event) => {
+    const refs = ensurePopupRefs();
+    renderStaticSections();
+
+    refs.previewToggle.addEventListener("mousedown", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      imageScan.armPasteCapture();
-    };
+      suppressSelectionOnce();
+    });
+
+    refs.previewToggle.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      suppressSelectionOnce();
+
+      if (!hasActivePopupState()) {
+        return;
+      }
+
+      popupState = {
+        ...popupState,
+        isExpanded: !popupState.isExpanded
+      };
+      renderSelectionPreview();
+      renderHeader();
+    });
+
+    refs.popup.addEventListener("click", async (event) => {
+      const copyButton = event.target.closest(".vocabai-popup__copy");
+
+      if (copyButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        await handleCopy(copyButton);
+        return;
+      }
+
+      if (event.target === refs.translateButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        await handleTranslate();
+        return;
+      }
+
+      if (event.target === refs.saveButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        await handleSave();
+        return;
+      }
+
+      if (event.target === refs.scanImageButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        window.VocabAIExtension.imageScan?.openImagePicker?.();
+        return;
+      }
+
+      if (event.target === refs.pasteImageButton) {
+        event.preventDefault();
+        event.stopPropagation();
+        window.VocabAIExtension.imageScan?.armPasteCapture?.();
+      }
+    });
+
+    refs.translateSelect.addEventListener("change", async (event) => {
+      const nextLang = getAllowedLanguage(event.target.value);
+
+      popupState = {
+        ...popupState,
+        targetLang: nextLang,
+        translatedText: "",
+        translationState: "idle",
+        translationMessage: ""
+      };
+      renderTranslation();
+
+      try {
+        await setStoredTargetLanguage(nextLang);
+      } catch (_error) {
+        popupState = {
+          ...popupState,
+          translationState: "error",
+          translationMessage: "Translation failed"
+        };
+        renderTranslation();
+      }
+    });
+
+    listenersBound = true;
   }
 
   async function copyToClipboard(text) {
@@ -161,20 +480,10 @@ window.VocabAIExtension = window.VocabAIExtension || {};
       normalizedText = "No data available";
     }
 
-    console.log("VocabAI copied text:", normalizedText);
     await navigator.clipboard.writeText(normalizedText);
   }
 
-  function setCopyFeedback(copyType, message) {
-    popupState = {
-      ...popupState,
-      copyFeedback: {
-        ...(popupState.copyFeedback || {}),
-        [copyType]: message
-      }
-    };
-    renderCurrentPopup();
-
+  function resetCopyFeedbackLater(copyType) {
     if (copyResetTimers[copyType]) {
       window.clearTimeout(copyResetTimers[copyType]);
     }
@@ -191,279 +500,204 @@ window.VocabAIExtension = window.VocabAIExtension || {};
           [copyType]: ""
         }
       };
-      renderCurrentPopup();
+
+      if (copyType === "meaning") {
+        renderMeaning();
+      } else if (copyType === "translation") {
+        renderTranslation();
+      } else if (copyType === "word") {
+        renderHeader();
+      } else {
+        renderRelations();
+      }
     }, 1500);
   }
 
-  function bindCopyButtons() {
-    const copyButtons = document.querySelectorAll(".vocabai-popup__copy");
-
-    if (!copyButtons.length || !hasActivePopupState()) {
+  async function handleCopy(button) {
+    if (!hasActivePopupState()) {
       return;
     }
 
-    copyButtons.forEach((button) => {
-      button.onclick = async (event) => {
-        event.preventDefault();
-        event.stopPropagation();
+    const copyType = button.dataset.copyType || "";
+    const copyValue = button.dataset.copyValue || "";
 
-        const copyType = button.dataset.copyType || "";
-        const copyValue = button.dataset.copyValue || "";
+    if (!copyType) {
+      return;
+    }
 
-        if (!copyType) {
+    try {
+      await copyToClipboard(copyValue);
+      popupState = {
+        ...popupState,
+        copyFeedback: {
+          ...(popupState.copyFeedback || {}),
+          [copyType]: "Copied \u2705"
+        }
+      };
+    } catch (_error) {
+      popupState = {
+        ...popupState,
+        copyFeedback: {
+          ...(popupState.copyFeedback || {}),
+          [copyType]: "Copy failed"
+        }
+      };
+    }
+
+    if (copyType === "meaning") {
+      renderMeaning();
+    } else if (copyType === "translation") {
+      renderTranslation();
+    } else if (copyType === "word") {
+      renderHeader();
+    } else {
+      renderRelations();
+    }
+
+    resetCopyFeedbackLater(copyType);
+  }
+
+  function abortControllerSafely(controller) {
+    if (!controller) {
+      return;
+    }
+
+    try {
+      controller.abort();
+    } catch (_error) {
+      // Ignore abort races.
+    }
+  }
+
+  function clearRelationPolling() {
+    if (relationPollTimeoutId) {
+      window.clearTimeout(relationPollTimeoutId);
+      relationPollTimeoutId = null;
+    }
+  }
+
+  function resetPopupState() {
+    abortControllerSafely(selectionRequestController);
+    selectionRequestController = null;
+    abortControllerSafely(translationRequestController);
+    translationRequestController = null;
+    clearRelationPolling();
+    popupState = null;
+    popupRefs = null;
+  }
+
+  function createAbortError() {
+    return new DOMException("Operation aborted.", "AbortError");
+  }
+
+  function sendRuntimeMessage(message, signal) {
+    return new Promise((resolve, reject) => {
+      if (!isExtensionContextAvailable()) {
+        reject(new Error("Extension context invalidated."));
+        return;
+      }
+
+      let settled = false;
+      let abortHandler = null;
+
+      const cleanup = () => {
+        if (signal && abortHandler) {
+          signal.removeEventListener("abort", abortHandler);
+        }
+      };
+
+      abortHandler = () => {
+        if (settled) {
           return;
         }
 
-        try {
-          await copyToClipboard(copyValue);
-          setCopyFeedback(copyType, "Copied \u2705");
-        } catch (_error) {
-          setCopyFeedback(copyType, "Copy failed");
+        settled = true;
+        cleanup();
+        reject(createAbortError());
+      };
+
+      if (signal) {
+        if (signal.aborted) {
+          abortHandler();
+          return;
         }
-      };
-    });
-  }
 
-  function bindPreviewToggle() {
-    const toggleButton = document.querySelector(".vocabai-popup__toggle-preview");
-
-    if (!toggleButton || !hasActivePopupState()) {
-      return;
-    }
-
-    toggleButton.onmousedown = (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      suppressSelectionOnce();
-    };
-
-    toggleButton.onclick = (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      suppressSelectionOnce();
-
-      popupState = {
-        ...popupState,
-        isExpanded: !popupState.isExpanded
-      };
-      renderCurrentPopup();
-    };
-  }
-
-  function fetchWordDetails(selectedText) {
-    return new Promise((resolve, reject) => {
-      if (!isExtensionContextAvailable()) {
-        reject(new Error("Extension context invalidated."));
-        return;
+        signal.addEventListener("abort", abortHandler, { once: true });
       }
 
       try {
-        chrome.runtime.sendMessage(
-          {
-            type: "FETCH_WORD_DETAILS",
-            text: selectedText
-          },
-          (response) => {
-            if (!isExtensionContextAvailable()) {
-              reject(new Error("Extension context invalidated."));
-              return;
-            }
-
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-              return;
-            }
-
-            if (!response?.success) {
-              reject(new Error(response?.error || "Failed to fetch meaning"));
-              return;
-            }
-
-            resolve(response.data);
+        chrome.runtime.sendMessage(message, (response) => {
+          if (settled) {
+            return;
           }
-        );
+
+          settled = true;
+          cleanup();
+
+          if (!isExtensionContextAvailable()) {
+            reject(new Error("Extension context invalidated."));
+            return;
+          }
+
+          if (chrome.runtime.lastError) {
+            reject(new Error(chrome.runtime.lastError.message));
+            return;
+          }
+
+          if (!response?.success) {
+            reject(new Error(response?.error || "Request failed."));
+            return;
+          }
+
+          resolve(response.data ?? response);
+        });
       } catch (error) {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        cleanup();
         reject(error);
       }
     });
   }
 
-  async function loadAnalysisFromText(text, rect) {
-    renderPopup(getLoadingMarkup(text), rect, {
-      wide: text.length > LONG_TEXT_THRESHOLD
-    });
-
-    try {
-      const [data, authenticated, targetLang] = await Promise.all([
-        fetchWordDetails(text),
-        getAuthStatus(),
-        getStoredTargetLanguage()
-      ]);
-
-      console.log("VocabAI received word data:", data);
-
-      popupState = {
-        selectedText: text,
-        rect,
-        word: data.word,
-        language: data.language || "",
-        meaning: data.meaning,
-        synonyms: Array.isArray(data.synonyms) ? data.synonyms : [],
-        antonyms: Array.isArray(data.antonyms) ? data.antonyms : [],
-        targetLang,
-        translationState: "idle",
-        translationMessage: "",
-        translatedText: "",
-        saveState: "idle",
-        saveMessage: "",
-        isAuthenticated: authenticated,
-        allowSave: isSingleWordSelection(text),
-        showTranslate: true,
-        isLongSelection: text.length > LONG_TEXT_THRESHOLD,
-        isExpanded: false,
-        copyFeedback: {}
-      };
-      renderCurrentPopup();
-    } catch (_error) {
-      const targetLang = await getStoredTargetLanguage().catch(() => DEFAULT_TARGET_LANG);
-      const authenticated = await getAuthStatus().catch(() => false);
-
-      console.log("VocabAI received fallback data for selection:", {
-        word: text,
-        language: "",
-        meaning: "Meaning is unavailable for this selection.",
-        synonyms: [],
-        antonyms: []
-      });
-
-      popupState = {
-        selectedText: text,
-        rect,
-        word: text,
-        language: "",
-        meaning: "Meaning is unavailable for this selection.",
-        synonyms: [],
-        antonyms: [],
-        targetLang,
-        translationState: "idle",
-        translationMessage: "",
-        translatedText: "",
-        saveState: "idle",
-        saveMessage: "",
-        isAuthenticated: authenticated,
-        allowSave: false,
-        showTranslate: true,
-        isLongSelection: text.length > LONG_TEXT_THRESHOLD,
-        isExpanded: false,
-        copyFeedback: {}
-      };
-
-      renderCurrentPopup();
-    }
+  function fetchWordDetails(selectedText, signal) {
+    return sendRuntimeMessage(
+      {
+        type: "FETCH_WORD_DETAILS",
+        text: selectedText
+      },
+      signal
+    );
   }
 
-  function saveWordDetails(wordData) {
-    return new Promise((resolve, reject) => {
-      if (!isExtensionContextAvailable()) {
-        reject(new Error("Extension context invalidated."));
-        return;
-      }
-
-      try {
-        chrome.runtime.sendMessage(
-          {
-            type: "SAVE_WORD",
-            data: wordData
-          },
-          (response) => {
-            if (!isExtensionContextAvailable()) {
-              reject(new Error("Extension context invalidated."));
-              return;
-            }
-
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-              return;
-            }
-
-            resolve(response);
-          }
-        );
-      } catch (error) {
-        reject(error);
-      }
-    });
+  function saveWordDetails(wordData, signal) {
+    return sendRuntimeMessage(
+      {
+        type: "SAVE_WORD",
+        data: wordData
+      },
+      signal
+    );
   }
 
-  function requestTranslation(text, targetLang) {
-    return new Promise((resolve, reject) => {
-      if (!isExtensionContextAvailable()) {
-        reject(new Error("Extension context invalidated."));
-        return;
-      }
-
-      try {
-        chrome.runtime.sendMessage(
-          {
-            type: "TRANSLATE_TEXT",
-            text,
-            targetLang
-          },
-          (response) => {
-            if (!isExtensionContextAvailable()) {
-              reject(new Error("Extension context invalidated."));
-              return;
-            }
-
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-              return;
-            }
-
-            if (!response?.success) {
-              reject(new Error(response?.error || "Translation failed"));
-              return;
-            }
-
-            resolve(response.data);
-          }
-        );
-      } catch (error) {
-        reject(error);
-      }
-    });
+  function requestTranslation(text, targetLang, signal) {
+    return sendRuntimeMessage(
+      {
+        type: "TRANSLATE_TEXT",
+        text,
+        targetLang
+      },
+      signal
+    );
   }
 
   function getAuthStatus() {
-    return new Promise((resolve, reject) => {
-      if (!isExtensionContextAvailable()) {
-        reject(new Error("Extension context invalidated."));
-        return;
-      }
-
-      try {
-        chrome.runtime.sendMessage(
-          {
-            type: "GET_AUTH_STATUS"
-          },
-          (response) => {
-            if (!isExtensionContextAvailable()) {
-              reject(new Error("Extension context invalidated."));
-              return;
-            }
-
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-              return;
-            }
-
-            resolve(Boolean(response?.authenticated));
-          }
-        );
-      } catch (error) {
-        reject(error);
-      }
-    });
+    return sendRuntimeMessage({ type: "GET_AUTH_STATUS" }).then((response) =>
+      Boolean(response?.authenticated)
+    );
   }
 
   function getStoredTargetLanguage() {
@@ -540,157 +774,268 @@ window.VocabAIExtension = window.VocabAIExtension || {};
     });
   }
 
-  function bindSaveButton() {
-    const saveButton = document.querySelector(".vocabai-popup__save");
-
-    if (!saveButton || !hasActivePopupState() || !popupState.allowSave) {
+  async function handleTranslate() {
+    if (!hasActivePopupState()) {
       return;
     }
 
-    saveButton.onclick = async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
+    abortControllerSafely(translationRequestController);
+    translationRequestController = new AbortController();
 
-      if (!popupState.isAuthenticated) {
-        window.open("http://localhost:5173/login", "_blank", "noopener,noreferrer");
+    popupState = {
+      ...popupState,
+      translationState: "loading",
+      translationMessage: "",
+      translatedText: ""
+    };
+    renderTranslation();
+
+    try {
+      const response = await requestTranslation(
+        popupState.selectedText,
+        popupState.targetLang,
+        translationRequestController.signal
+      );
+
+      popupState = {
+        ...popupState,
+        translationState: "success",
+        translationMessage: "",
+        translatedText: response?.translatedText || ""
+      };
+      renderTranslation();
+    } catch (error) {
+      if (error?.name === "AbortError") {
         return;
       }
 
       popupState = {
         ...popupState,
-        saveState: "saving",
-        saveMessage: ""
+        translationState: "error",
+        translationMessage: "Translation failed",
+        translatedText: ""
       };
-      renderCurrentPopup();
-
-      try {
-        const response = await saveWordDetails({
-          word: popupState.word,
-          meaning: popupState.meaning,
-          synonyms: popupState.synonyms,
-          antonyms: popupState.antonyms
-        });
-
-        if (response?.success) {
-          popupState = {
-            ...popupState,
-            saveState: "saved",
-            saveMessage: "Saved successfully \u2705"
-          };
-          renderCurrentPopup();
-          return;
-        }
-
-        if (response?.error === "NOT_AUTHENTICATED") {
-          popupState = {
-            ...popupState,
-            isAuthenticated: false,
-            saveState: "error",
-            saveMessage: "Please login first"
-          };
-          renderCurrentPopup();
-          return;
-        }
-
-        popupState = {
-          ...popupState,
-          saveState: "error",
-          saveMessage: response?.error || "Failed to save"
-        };
-        renderCurrentPopup();
-      } catch (_error) {
-        popupState = {
-          ...popupState,
-          saveState: "error",
-          saveMessage: "Failed to save"
-        };
-        renderCurrentPopup();
-      }
-    };
+      renderTranslation();
+    }
   }
 
-  function bindTranslateControls() {
-    const languageSelect = document.querySelector(".vocabai-popup__select");
-    const translateButton = document.querySelector(".vocabai-popup__translate-button");
-
-    if (!languageSelect || !translateButton || !hasActivePopupState()) {
+  async function handleSave() {
+    if (!hasActivePopupState() || !popupState.allowSave) {
       return;
     }
 
-    languageSelect.value = getAllowedLanguage(popupState.targetLang);
+    if (!popupState.isAuthenticated) {
+      window.open("http://localhost:5173/login", "_blank", "noopener,noreferrer");
+      return;
+    }
 
-    languageSelect.onchange = async (event) => {
-      const nextLang = getAllowedLanguage(event.target.value);
+    popupState = {
+      ...popupState,
+      saveState: "saving",
+      saveMessage: ""
+    };
+    renderSaveSection();
+
+    try {
+      const response = await saveWordDetails({
+        word: popupState.word,
+        meaning: popupState.meaning,
+        synonyms: popupState.synonyms,
+        antonyms: popupState.antonyms
+      });
+
+      if (response?.success) {
+        popupState = {
+          ...popupState,
+          saveState: "saved",
+          saveMessage: "Saved successfully \u2705"
+        };
+        renderSaveSection();
+        return;
+      }
 
       popupState = {
         ...popupState,
-        targetLang: nextLang,
-        translatedText: "",
-        translationState: "idle",
-        translationMessage: ""
+        saveState: "error",
+        saveMessage: "Failed to save"
       };
-      renderCurrentPopup();
+      renderSaveSection();
+    } catch (_error) {
+      popupState = {
+        ...popupState,
+        saveState: "error",
+        saveMessage: "Failed to save"
+      };
+      renderSaveSection();
+    }
+  }
+
+  async function pollForRelationUpdates(text, controller, attemptsLeft) {
+    if (!controller || controller.signal.aborted || attemptsLeft <= 0) {
+      return;
+    }
+
+    relationPollTimeoutId = window.setTimeout(async () => {
+      relationPollTimeoutId = null;
+
+      if (controller.signal.aborted || !hasActivePopupState()) {
+        return;
+      }
 
       try {
-        await setStoredTargetLanguage(nextLang);
-      } catch (_error) {
+        const data = await fetchWordDetails(text, controller.signal);
+
+        if (controller.signal.aborted || !hasActivePopupState()) {
+          return;
+        }
+
         popupState = {
           ...popupState,
-          translationState: "error",
-          translationMessage: "Translation failed"
+          synonyms: normalizeList(data.synonyms),
+          antonyms: normalizeList(data.antonyms),
+          relationFetchStatus: normalizeRelationStatus(data.relationFetchStatus)
         };
-        renderCurrentPopup();
-      }
-    };
+        renderRelations();
 
-    translateButton.onclick = async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
+        if (popupState.relationFetchStatus === "loading") {
+          await pollForRelationUpdates(text, controller, attemptsLeft - 1);
+          return;
+        }
+      } catch (error) {
+        if (error?.name === "AbortError") {
+          return;
+        }
+      }
 
       popupState = {
         ...popupState,
-        translationState: "loading",
-        translationMessage: "",
-        translatedText: ""
+        relationFetchStatus: "complete"
       };
-      renderCurrentPopup();
+      renderRelations();
+    }, RELATION_POLL_INTERVAL_MS);
+  }
 
-      try {
-        const response = await requestTranslation(popupState.selectedText, popupState.targetLang);
+  async function loadAnalysisFromText(text, rect) {
+    abortControllerSafely(selectionRequestController);
+    abortControllerSafely(translationRequestController);
+    clearRelationPolling();
 
-        popupState = {
-          ...popupState,
-          translationState: "success",
-          translationMessage: "",
-          translatedText: response?.translatedText || ""
-        };
-        renderCurrentPopup();
-      } catch (_error) {
-        popupState = {
-          ...popupState,
-          translationState: "error",
-          translationMessage: "Translation failed",
-          translatedText: ""
-        };
-        renderCurrentPopup();
-      }
+    selectionRequestController = new AbortController();
+    const { signal } = selectionRequestController;
+    const refs = showPopup(rect, {
+      wide: text.length > LONG_TEXT_THRESHOLD,
+      preservePosition: true
+    });
+
+    bindPopupListeners();
+    popupState = {
+      selectedText: text,
+      rect,
+      word: text,
+      language: "",
+      meaning: "Loading...",
+      synonyms: [],
+      antonyms: [],
+      relationFetchStatus: "loading",
+      targetLang: DEFAULT_TARGET_LANG,
+      translationState: "idle",
+      translationMessage: "",
+      translatedText: "",
+      saveState: "idle",
+      saveMessage: "",
+      isAuthenticated: false,
+      allowSave: isSingleWordSelection(text),
+      showTranslate: true,
+      isLongSelection: text.length > LONG_TEXT_THRESHOLD,
+      isExpanded: false,
+      copyFeedback: {}
     };
+
+    refs.popup.classList.toggle("wide-popup", popupState.isLongSelection);
+    renderHeader();
+    renderSelectionPreview();
+    renderMeaning();
+    renderRelations();
+    renderTranslation();
+    renderSaveSection();
+    renderStatusSection({ loading: true, message: "Loading..." });
+
+    try {
+      const [data, authenticated, targetLang] = await Promise.all([
+        fetchWordDetails(text, signal),
+        getAuthStatus().catch(() => false),
+        getStoredTargetLanguage().catch(() => DEFAULT_TARGET_LANG)
+      ]);
+
+      if (signal.aborted) {
+        return;
+      }
+
+      popupState = {
+        ...popupState,
+        word: data.word,
+        language: data.language || "",
+        meaning: data.meaning || "No meaning available.",
+        synonyms: normalizeList(data.synonyms),
+        antonyms: normalizeList(data.antonyms),
+        relationFetchStatus: normalizeRelationStatus(data.relationFetchStatus),
+        targetLang,
+        isAuthenticated: authenticated,
+        allowSave: isSingleWordSelection(text)
+      };
+
+      renderWordDetails();
+
+      if (popupState.relationFetchStatus === "loading") {
+        await pollForRelationUpdates(text, selectionRequestController, RELATION_POLL_MAX_ATTEMPTS);
+        return;
+      }
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        return;
+      }
+
+      popupState = {
+        ...popupState,
+        word: text,
+        language: "",
+        meaning: "Meaning is unavailable for this selection.",
+        synonyms: [],
+        antonyms: [],
+        relationFetchStatus: "complete",
+        allowSave: false
+      };
+      renderWordDetails();
+      renderStatusSection({
+        message: error instanceof Error ? error.message : "Failed to fetch meaning",
+        error: true
+      });
+      return;
+    }
+
+    renderStatusSection();
   }
 
   async function handleSelection(selection) {
     if (!selection) {
+      resetPopupState();
       return;
     }
 
-    const { text, rect } = selection;
-    await loadAnalysisFromText(text, rect);
+    await loadAnalysisFromText(selection.text, selection.rect);
   }
 
   initializePopupHandlers();
+  ensurePopupRefs();
+  bindPopupListeners();
+  setCloseHandler(() => {
+    resetPopupState();
+  });
   initializeSelectionListener({
     onSelection: handleSelection,
     shouldIgnoreSelection: (event) =>
-      consumeSelectionSuppression() || isPopupInteraction(event)
+      consumeSelectionSuppression() || isPopupInteraction(event),
+    debounceMs: 300
   });
 
   window.VocabAIExtension.contentActions = {
@@ -702,10 +1047,12 @@ window.VocabAIExtension = window.VocabAIExtension || {};
       await loadAnalysisFromText(text.trim(), buildDefaultPopupRect());
     },
     showOcrLoading: (label = "Scanning image...") => {
-      renderPopup(getLoadingMarkup(label), buildDefaultPopupRect(), { wide: true });
+      showPopup(buildDefaultPopupRect(), { wide: true, preservePosition: true });
+      renderStatusSection({ loading: true, message: label });
     },
     showOcrError: (message = "OCR failed") => {
-      renderPopup(getStatusMarkup("OCR Error", message, true), buildDefaultPopupRect(), { wide: true });
+      showPopup(buildDefaultPopupRect(), { wide: true, preservePosition: true });
+      renderStatusSection({ message, error: true });
     }
   };
 })();

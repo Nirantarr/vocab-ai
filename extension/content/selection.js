@@ -21,7 +21,13 @@ function getSelectionRect() {
   return rect;
 }
 
-function initializeSelectionListener({ onSelection, shouldIgnoreSelection }) {
+function initializeSelectionListener({
+  onSelection,
+  shouldIgnoreSelection,
+  debounceMs = 0
+}) {
+  let debounceTimerId = null;
+
   document.addEventListener("mouseup", (event) => {
     window.setTimeout(() => {
       if (typeof shouldIgnoreSelection === "function" && shouldIgnoreSelection(event)) {
@@ -31,12 +37,28 @@ function initializeSelectionListener({ onSelection, shouldIgnoreSelection }) {
       const text = getSelectedText();
       const rect = getSelectionRect();
 
-      if (!text || !rect) {
-        onSelection(null);
+      const emitSelection = () => {
+        if (!text || !rect) {
+          onSelection(null);
+          return;
+        }
+
+        onSelection({ text, rect });
+      };
+
+      if (debounceTimerId) {
+        window.clearTimeout(debounceTimerId);
+      }
+
+      if (debounceMs > 0) {
+        debounceTimerId = window.setTimeout(() => {
+          debounceTimerId = null;
+          emitSelection();
+        }, debounceMs);
         return;
       }
 
-      onSelection({ text, rect });
+      emitSelection();
     }, 0);
   });
 }

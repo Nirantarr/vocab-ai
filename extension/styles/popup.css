@@ -79,6 +79,9 @@
 }
 
 .vocabai-popup__close {
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
   flex-shrink: 0;
   border: none;
   background: transparent;
@@ -261,6 +264,10 @@
   color: var(--text-soft, #64748b);
 }
 
+.vocabai-popup__relation-content {
+  min-width: 0;
+}
+
 .vocabai-popup__value,
 .vocabai-popup__status {
   margin-top: 4px;
@@ -269,6 +276,10 @@
   color: var(--text-muted, #334155);
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+.vocabai-popup__value--loading {
+  color: var(--text-soft, #64748b);
 }
 
 .vocabai-popup__status--error {

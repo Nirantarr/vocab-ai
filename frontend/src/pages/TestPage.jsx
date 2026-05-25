@@ -2,13 +2,11 @@ import { useMemo, useState } from 'react'
 import TestConfigCard from '../components/test/TestConfigCard'
 import TestQuestionCard from '../components/test/TestQuestionCard'
 import TestResults from '../components/test/TestResults'
-import { useAuth } from '../context/AuthContext'
 import { fetchQuiz } from '../services/api'
 
 const DEFAULT_LIMIT = 5
 
 export default function TestPage() {
-  const { token } = useAuth()
   const [selectedLimit, setSelectedLimit] = useState(DEFAULT_LIMIT)
   const [questions, setQuestions] = useState([])
   const [answers, setAnswers] = useState({})
@@ -39,7 +37,7 @@ export default function TestPage() {
     setError('')
 
     try {
-      const data = await fetchQuiz(selectedLimit, token)
+      const data = await fetchQuiz(selectedLimit)
       setQuestions(data.questions || [])
       setAnswers({})
       setCurrentIndex(0)

@@ -60,16 +60,71 @@ function renderCopyButton(copyType, copyValue, copyFeedback = "") {
   `;
 }
 
+function renderFieldHeader(label, copyMarkup = "") {
+  return `
+    <div class="vocabai-popup__field-header">
+      <div class="vocabai-popup__label">${escapeHtml(label)}</div>
+      ${copyMarkup}
+    </div>
+  `;
+}
+
 function renderField(label, value, { copyType = "", copyValue = value, copyFeedback = "" } = {}) {
   const normalizedValue = normalizeListText(value);
 
   return `
     <div class="vocabai-popup__field">
-      <div class="vocabai-popup__field-header">
-        <div class="vocabai-popup__label">${escapeHtml(label)}</div>
-        ${renderCopyButton(copyType, copyValue, copyFeedback)}
-      </div>
+      ${renderFieldHeader(label, renderCopyButton(copyType, copyValue, copyFeedback))}
       <div class="vocabai-popup__value">${escapeHtml(normalizedValue)}</div>
+    </div>
+  `;
+}
+
+function normalizeRelationStatus(status) {
+  return status === "loading" || status === "complete" ? status : "complete";
+}
+
+function getRelationValueMarkup(value, status = "complete") {
+  const normalizedStatus = normalizeRelationStatus(status);
+  const hasValue = Array.isArray(value) && value.some((item) => typeof item === "string" && item.trim());
+
+  if (normalizedStatus === "loading") {
+    return '<div class="vocabai-popup__value vocabai-popup__value--loading">Loading...</div>';
+  }
+
+  if (hasValue) {
+    return `<div class="vocabai-popup__value">${escapeHtml(normalizeListText(value))}</div>`;
+  }
+
+  if (normalizedStatus === "complete") {
+    return '<div class="vocabai-popup__value">No data available</div>';
+  }
+
+  return '<div class="vocabai-popup__value">No data available</div>';
+}
+
+function renderRelationField(
+  label,
+  value,
+  {
+    sectionKey = "",
+    copyType = "",
+    copyFeedback = "",
+    status = "complete"
+  } = {}
+) {
+  const normalizedStatus = normalizeRelationStatus(status);
+  const hasValue = Array.isArray(value) && value.some((item) => typeof item === "string" && item.trim());
+  const copyMarkup = hasValue && normalizedStatus !== "loading"
+    ? renderCopyButton(copyType, value, copyFeedback)
+    : "";
+
+  return `
+    <div class="vocabai-popup__field vocabai-popup__field--relation" data-relation-section="${escapeHtml(sectionKey)}">
+      ${renderFieldHeader(label, copyMarkup)}
+      <div class="vocabai-popup__relation-content">
+        ${getRelationValueMarkup(value, normalizedStatus)}
+      </div>
     </div>
   `;
 }
@@ -301,6 +356,7 @@ function getResultMarkup({
   meaning,
   synonyms,
   antonyms,
+  relationFetchStatus,
   targetLang,
   translationState,
   translationMessage,
@@ -324,23 +380,31 @@ function getResultMarkup({
   return renderShell(
     getPopupTitle(word, selectedText),
     [
+      (() => {
+        const normalizedRelationStatus = normalizeRelationStatus(relationFetchStatus);
+
+        return [
       renderSelectionPreview(selectedText, word, isExpanded),
       renderField("Meaning", meaning || "No meaning available.", {
         copyType: "meaning",
         copyValue: meaning || "",
         copyFeedback: copyFeedback.meaning
       }),
-      renderField("Synonyms", synonyms, {
+      renderRelationField("Synonyms", synonyms, {
+        sectionKey: "synonyms",
         copyType: "synonyms",
-        copyValue: synonyms,
-        copyFeedback: copyFeedback.synonyms
+        copyFeedback: copyFeedback.synonyms,
+        status: normalizedRelationStatus
       }),
-      renderField("Antonyms", antonyms, {
+      renderRelationField("Antonyms", antonyms, {
+        sectionKey: "antonyms",
         copyType: "antonyms",
-        copyValue: antonyms,
-        copyFeedback: copyFeedback.antonyms
+        copyFeedback: copyFeedback.antonyms,
+        status: normalizedRelationStatus
       }),
       translationSection.body
+        ].join("");
+      })()
     ].join(""),
     [
       translationSection.footer,
@@ -368,6 +432,10 @@ window.VocabAIExtension.ui = {
   LONG_TEXT_THRESHOLD,
   getErrorMarkup,
   getLoadingMarkup,
+  getRelationValueMarkup,
+  normalizeRelationStatus,
+  renderCopyButton,
+  renderFieldHeader,
   getResultMarkup,
   getStatusMarkup
 };

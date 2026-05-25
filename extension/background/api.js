@@ -1,5 +1,13 @@
 import { API_ENDPOINTS } from "../utils/constants.js";
 
+const API_BASE_URL = "http://localhost:5000";
+const AUTH_ENDPOINTS = {
+  session: `${API_BASE_URL}/api/auth/session`,
+  refresh: `${API_BASE_URL}/api/auth/refresh`,
+  logout: `${API_BASE_URL}/api/auth/logout`,
+};
+const DEFAULT_TIMEOUT_MS = 8000;
+
 async function parseJson(response) {
   try {
     return await response.json();
@@ -8,13 +16,98 @@ async function parseJson(response) {
   }
 }
 
-export async function fetchWordDetails(selectedText) {
-  const response = await fetch(
-    `${API_ENDPOINTS.wordLookup}?text=${encodeURIComponent(selectedText)}`
-  );
-  const data = await parseJson(response);
+function createTimedAbortSignal(timeoutMs = DEFAULT_TIMEOUT_MS, externalSignal) {
+  const controller = new AbortController();
+  const timeoutId = globalThis.setTimeout(() => {
+    controller.abort(new DOMException("Request timed out.", "AbortError"));
+  }, timeoutMs);
 
-  if (!response.ok || !data?.word || !data?.meaning) {
+  const abortFromExternal = () => {
+    controller.abort(new DOMException("Request aborted.", "AbortError"));
+  };
+
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      abortFromExternal();
+    } else {
+      externalSignal.addEventListener("abort", abortFromExternal, { once: true });
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      globalThis.clearTimeout(timeoutId);
+
+      if (externalSignal) {
+        externalSignal.removeEventListener("abort", abortFromExternal);
+      }
+    },
+  };
+}
+
+async function withTimeout(task, { signal, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  const timedSignal = createTimedAbortSignal(timeoutMs, signal);
+
+  try {
+    return await task(timedSignal.signal);
+  } finally {
+    timedSignal.cleanup();
+  }
+}
+
+async function refreshSession(options = {}) {
+  const response = await fetch(AUTH_ENDPOINTS.refresh, {
+    method: "POST",
+    credentials: "include",
+    signal: options.signal,
+  });
+
+  if (!response.ok) {
+    throw new Error("Session expired. Please log in again.");
+  }
+
+  return parseJson(response);
+}
+
+async function request(url, options = {}, { retryOnAuthFailure = true, timeoutMs = DEFAULT_TIMEOUT_MS, signal } = {}) {
+  return withTimeout(async (timedSignal) => {
+    const response = await fetch(url, {
+      credentials: "include",
+      ...options,
+      signal: timedSignal,
+    });
+    const data = await parseJson(response);
+
+    if (response.status === 401 && retryOnAuthFailure) {
+      await refreshSession({ signal: timedSignal });
+      return request(url, options, {
+        retryOnAuthFailure: false,
+        timeoutMs,
+        signal: timedSignal,
+      });
+    }
+
+    if (!response.ok) {
+      throw new Error(data?.message || "Request failed");
+    }
+
+    return data;
+  }, { signal, timeoutMs });
+}
+
+export function fetchSession(options = {}) {
+  return request(AUTH_ENDPOINTS.session, {}, options);
+}
+
+export async function fetchWordDetails(selectedText, options = {}) {
+  const data = await request(
+    `${API_ENDPOINTS.wordLookup}?text=${encodeURIComponent(selectedText)}`,
+    {},
+    { ...options, retryOnAuthFailure: false }
+  );
+
+  if (!data?.word || !data?.meaning) {
     throw new Error(data?.message || "Failed to fetch meaning");
   }
 
@@ -23,71 +116,49 @@ export async function fetchWordDetails(selectedText) {
     language: typeof data.language === "string" ? data.language : "",
     meaning: data.meaning,
     synonyms: Array.isArray(data.synonyms) ? data.synonyms : [],
-    antonyms: Array.isArray(data.antonyms) ? data.antonyms : []
+    antonyms: Array.isArray(data.antonyms) ? data.antonyms : [],
+    relationFetchStatus:
+      typeof data.relationFetchStatus === "string" ? data.relationFetchStatus : "complete",
   };
 }
 
-export async function saveWord(word, token) {
-  const response = await fetch(API_ENDPOINTS.saveWord, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {})
-    },
-    body: JSON.stringify({ word })
-  });
-  const data = await parseJson(response);
-
-  if (!response.ok) {
-    throw new Error(data?.message || "Failed to save word");
-  }
-
-  return data;
-}
-
-export async function saveWordDetails(wordData, token) {
+export async function saveWordDetails(wordData, options = {}) {
   for (const endpoint of API_ENDPOINTS.saveWord) {
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify(wordData)
-    });
+    try {
+      const data = await request(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(wordData),
+      }, options);
 
-    const data = await parseJson(response);
+      return data;
+    } catch (error) {
+      if (String(error?.message || "").includes("Session expired")) {
+        throw error;
+      }
 
-    if (response.ok) {
-      return { success: true };
+      if (!String(endpoint).includes("/words/save")) {
+        throw error;
+      }
     }
-
-    if (response.status === 404) {
-      continue;
-    }
-
-    throw new Error(data?.message || "Failed to save word");
   }
 
   throw new Error("Save endpoint not found");
 }
 
-export async function translateText(text, targetLang) {
-  const response = await fetch(API_ENDPOINTS.translate, {
+export async function translateText(text, targetLang, options = {}) {
+  const data = await request(API_ENDPOINTS.translate, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json"
+      "Content-Type": "application/json",
     },
     body: JSON.stringify({
       text,
-      targetLang
-    })
-  });
-  const data = await parseJson(response);
-
-  if (!response.ok) {
-    throw new Error(data?.message || "Translation failed");
-  }
+      targetLang,
+    }),
+  }, { ...options, retryOnAuthFailure: false });
 
   const translatedText =
     data?.translatedText ||
@@ -100,6 +171,12 @@ export async function translateText(text, targetLang) {
   }
 
   return {
-    translatedText: translatedText.trim()
+    translatedText: translatedText.trim(),
   };
+}
+
+export function logoutSession(options = {}) {
+  return request(AUTH_ENDPOINTS.logout, {
+    method: "POST",
+  }, { ...options, retryOnAuthFailure: false });
 }

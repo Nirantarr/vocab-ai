@@ -7,7 +7,6 @@ export const API_ENDPOINTS = {
 };
 
 export const STORAGE_KEYS = {
-  authToken: "authToken",
   targetLang: "targetLang"
 };
 

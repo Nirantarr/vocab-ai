@@ -1,18 +1,38 @@
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const {
+  clearAuthCookies,
+  doesRefreshTokenMatch,
+  getCookieMaxAge,
+  getRefreshTokenExpiry,
+  getTokensFromRequest,
+  hashRefreshToken,
+  setAuthCookies,
+  signAccessToken,
+  signRefreshToken,
+  verifyRefreshToken,
+} = require('../utils/auth');
 
-const generateToken = (userId) => {
-  const jwtSecret = process.env.JWT_SECRET;
+function sanitizeUser(user) {
+  return {
+    id: user._id,
+    email: user.email,
+    createdAt: user.createdAt,
+  };
+}
 
-  if (!jwtSecret) {
-    throw new Error('Missing JWT_SECRET in environment variables.');
-  }
+async function issueSession(res, user) {
+  const accessToken = signAccessToken(user._id.toString());
+  const refreshToken = signRefreshToken(user._id.toString());
 
-  return jwt.sign({ userId }, jwtSecret, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-  });
-};
+  user.refreshTokenHash = await hashRefreshToken(refreshToken);
+  user.refreshTokenExpiresAt = new Date(
+    Date.now() + getCookieMaxAge(getRefreshTokenExpiry(), 30 * 24 * 60 * 60 * 1000)
+  );
+  await user.save();
+
+  setAuthCookies(res, accessToken, refreshToken);
+}
 
 const signup = async (req, res) => {
   try {
@@ -37,15 +57,13 @@ const signup = async (req, res) => {
       password: hashedPassword,
     });
 
+    await issueSession(res, user);
+
     return res.status(201).json({
       message: 'User created successfully.',
-      user: {
-        id: user._id,
-        email: user.email,
-        createdAt: user.createdAt,
-      },
+      user: sanitizeUser(user),
     });
-  } catch (error) {
+  } catch (_error) {
     return res.status(500).json({ message: 'Failed to sign up user.' });
   }
 };
@@ -71,23 +89,106 @@ const login = async (req, res) => {
       return res.status(401).json({ message: 'Invalid email or password.' });
     }
 
-    const token = generateToken(user._id.toString());
+    await issueSession(res, user);
 
     return res.status(200).json({
       message: 'Login successful.',
-      token,
-      user: {
-        id: user._id,
-        email: user.email,
-        createdAt: user.createdAt,
-      },
+      user: sanitizeUser(user),
     });
-  } catch (error) {
+  } catch (_error) {
     return res.status(500).json({ message: 'Failed to log in user.' });
   }
 };
 
+const getSession = async (req, res) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Not authenticated.' });
+  }
+
+  return res.status(200).json({
+    authenticated: true,
+    user: sanitizeUser(req.user),
+  });
+};
+
+const refreshSession = async (req, res) => {
+  try {
+    const { refreshToken } = getTokensFromRequest(req);
+
+    if (!refreshToken) {
+      clearAuthCookies(res);
+      return res.status(401).json({ message: 'Refresh token missing.' });
+    }
+
+    const decoded = verifyRefreshToken(refreshToken);
+    const user = await User.findById(decoded.userId);
+
+    if (!user || !user.refreshTokenHash) {
+      clearAuthCookies(res);
+      return res.status(401).json({ message: 'Refresh token invalid.' });
+    }
+
+    if (user.refreshTokenExpiresAt && user.refreshTokenExpiresAt.getTime() < Date.now()) {
+      user.refreshTokenHash = '';
+      user.refreshTokenExpiresAt = null;
+      await user.save();
+      clearAuthCookies(res);
+      return res.status(401).json({ message: 'Session expired.' });
+    }
+
+    const refreshMatches = await doesRefreshTokenMatch(refreshToken, user.refreshTokenHash);
+
+    if (!refreshMatches) {
+      user.refreshTokenHash = '';
+      user.refreshTokenExpiresAt = null;
+      await user.save();
+      clearAuthCookies(res);
+      return res.status(401).json({ message: 'Refresh token invalid.' });
+    }
+
+    await issueSession(res, user);
+
+    return res.status(200).json({
+      message: 'Session refreshed.',
+      user: sanitizeUser(user),
+    });
+  } catch (_error) {
+    clearAuthCookies(res);
+    return res.status(401).json({ message: 'Unable to refresh session.' });
+  }
+};
+
+const logout = async (req, res) => {
+  try {
+    const { refreshToken } = getTokensFromRequest(req);
+
+    if (refreshToken) {
+      try {
+        const decoded = verifyRefreshToken(refreshToken);
+        const user = await User.findById(decoded.userId);
+
+        if (user) {
+          user.refreshTokenHash = '';
+          user.refreshTokenExpiresAt = null;
+          await user.save();
+        }
+      } catch (_error) {
+        // Ignore invalid refresh token during logout and still clear cookies.
+      }
+    }
+
+    clearAuthCookies(res);
+    return res.status(200).json({ message: 'Logged out successfully.' });
+  } catch (_error) {
+    clearAuthCookies(res);
+    return res.status(200).json({ message: 'Logged out successfully.' });
+  }
+};
+
 module.exports = {
-  signup,
+  getSession,
   login,
+  logout,
+  refreshSession,
+  signup,
 };

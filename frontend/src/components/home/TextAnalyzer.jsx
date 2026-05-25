@@ -7,7 +7,7 @@ import SelectedTextAnalysis from './SelectedTextAnalysis'
 import WordModal from './WordModal'
 
 export default function TextAnalyzer() {
-  const { user, token, isAuthenticated } = useAuth()
+  const { user, isAuthenticated } = useAuth()
   const [text, setText] = useState('')
   const [keywords, setKeywords] = useState([])
   const [selectedTexts, setSelectedTexts] = useState([])
@@ -135,7 +135,7 @@ export default function TextAnalyzer() {
       return
     }
 
-    if (!token) {
+    if (!isAuthenticated) {
       setSaveMessage('Login required to save words.')
       return
     }
@@ -144,7 +144,7 @@ export default function TextAnalyzer() {
     setSaveMessage('')
 
     try {
-      const data = await saveWord(wordDetail.word, token)
+      const data = await saveWord(wordDetail.word)
       setSaveMessage(`"${data.word}" saved successfully.`)
     } catch (requestError) {
       setSaveMessage(requestError.message || 'Unable to save word right now.')
@@ -162,7 +162,7 @@ export default function TextAnalyzer() {
       return
     }
 
-    if (!token) {
+    if (!isAuthenticated) {
       showToast('Login required to save words.')
       return
     }
@@ -173,7 +173,7 @@ export default function TextAnalyzer() {
     }))
 
     try {
-      const data = await saveWord(item.text, token)
+      const data = await saveWord(item.text)
 
       setSelectedSaveStates((current) => ({
         ...current,

@@ -11,7 +11,7 @@ const initialStats = {
 }
 
 export default function DashboardPage() {
-  const { user, token } = useAuth()
+  const { user } = useAuth()
   const [stats, setStats] = useState(initialStats)
   const [words, setWords] = useState([])
   const [loading, setLoading] = useState(true)
@@ -37,8 +37,8 @@ export default function DashboardPage() {
 
       try {
         const [statsData, wordsData] = await Promise.all([
-          fetchUserStats(token),
-          fetchUserWords(token),
+          fetchUserStats(),
+          fetchUserWords(),
         ])
 
         if (!isMounted) {
@@ -65,7 +65,7 @@ export default function DashboardPage() {
     return () => {
       isMounted = false
     }
-  }, [token])
+  }, [])
 
   const handleToggleLearned = async (word, isLearned) => {
     setUpdatingWord(word)
@@ -87,7 +87,7 @@ export default function DashboardPage() {
     }))
 
     try {
-      const updatedWord = await markLearned(word, isLearned, token)
+      const updatedWord = await markLearned(word, isLearned)
 
       setWords((currentWords) =>
         sortWordsForDashboard(
