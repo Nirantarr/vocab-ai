@@ -1,33 +1,16 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const config = require('../config/env');
 
-const ACCESS_COOKIE_NAME = 'accessToken';
-const REFRESH_COOKIE_NAME = 'refreshToken';
-
-function getJwtSecret(name, fallback) {
-  const secret = process.env[name] || process.env[fallback];
-
-  if (!secret) {
-    throw new Error(`Missing ${name} in environment variables.`);
-  }
-
-  return secret;
-}
-
-function getAccessTokenSecret() {
-  return getJwtSecret('JWT_ACCESS_SECRET', 'JWT_SECRET');
-}
-
-function getRefreshTokenSecret() {
-  return getJwtSecret('JWT_REFRESH_SECRET', 'JWT_SECRET');
-}
+const ACCESS_COOKIE_NAME = config.cookies.accessTokenName;
+const REFRESH_COOKIE_NAME = config.cookies.refreshTokenName;
 
 function getAccessTokenExpiry() {
-  return process.env.JWT_ACCESS_EXPIRES_IN || '15m';
+  return config.auth.accessTokenExpiry;
 }
 
 function getRefreshTokenExpiry() {
-  return process.env.JWT_REFRESH_EXPIRES_IN || '30d';
+  return config.auth.refreshTokenExpiry;
 }
 
 function parseDurationMs(value, fallbackMs) {
@@ -64,36 +47,38 @@ function getCookieMaxAge(expiryValue, fallbackMs) {
 }
 
 function getCookieOptions() {
-  const sameSite = process.env.COOKIE_SAME_SITE || (process.env.NODE_ENV === 'production' ? 'none' : 'lax');
-  const secure = process.env.COOKIE_SECURE === 'true'
-    || (process.env.NODE_ENV === 'production' && process.env.COOKIE_SECURE !== 'false');
-
-  return {
+  const cookieOptions = {
     httpOnly: true,
-    sameSite,
-    secure,
+    sameSite: config.cookies.sameSite,
+    secure: config.cookies.secure,
     path: '/',
   };
+
+  if (config.cookies.domain) {
+    cookieOptions.domain = config.cookies.domain;
+  }
+
+  return cookieOptions;
 }
 
 function signAccessToken(userId) {
-  return jwt.sign({ userId }, getAccessTokenSecret(), {
+  return jwt.sign({ userId }, config.auth.accessTokenSecret, {
     expiresIn: getAccessTokenExpiry(),
   });
 }
 
 function signRefreshToken(userId) {
-  return jwt.sign({ userId }, getRefreshTokenSecret(), {
+  return jwt.sign({ userId }, config.auth.refreshTokenSecret, {
     expiresIn: getRefreshTokenExpiry(),
   });
 }
 
 function verifyAccessToken(token) {
-  return jwt.verify(token, getAccessTokenSecret());
+  return jwt.verify(token, config.auth.accessTokenSecret);
 }
 
 function verifyRefreshToken(token) {
-  return jwt.verify(token, getRefreshTokenSecret());
+  return jwt.verify(token, config.auth.refreshTokenSecret);
 }
 
 function parseCookies(req) {
@@ -156,8 +141,7 @@ function setAuthCookies(res, accessToken, refreshToken) {
 }
 
 async function hashRefreshToken(token) {
-  const saltRounds = Number(process.env.BCRYPT_SALT_ROUNDS) || 10;
-  return bcrypt.hash(token, saltRounds);
+  return bcrypt.hash(token, config.auth.bcryptSaltRounds);
 }
 
 async function doesRefreshTokenMatch(token, hash) {

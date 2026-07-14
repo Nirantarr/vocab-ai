@@ -1,45 +1,19 @@
 const express = require('express');
-const cors = require('cors');
-const dotenv = require('dotenv');
 const mongoose = require('mongoose');
+const config = require('./config/env');
+const { corsMiddleware, corsErrorHandler } = require('./middleware/corsMiddleware');
 const authRoutes = require('./routes/authRoutes');
 const wordRoutes = require('./routes/wordRoutes');
 const analyzeRoutes = require('./routes/analyzeRoutes');
 const userWordRoutes = require('./routes/userWordRoutes');
 const testRoutes = require('./routes/testRoutes');
 const translateRoutes = require('./routes/translateRoutes');
-
-dotenv.config();
+const { globalApiRateLimit } = require('./middleware/rateLimitMiddleware');
 
 const app = express();
-
-const PORT = process.env.PORT || 5000;
-const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URI;
-const DEFAULT_ALLOWED_ORIGINS = [
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-  'chrome-extension://kkofmigllhfkhonhjcdonpnfmcmjbbgp',
-];
-const allowedOrigins = new Set([
-  ...DEFAULT_ALLOWED_ORIGINS,
-  ...(process.env.ALLOWED_ORIGINS || '')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean),
-]);
-
-app.use(cors({
-  origin(origin, callback) {
-    if (!origin || allowedOrigins.has(origin)) {
-      callback(null, true);
-      return;
-    }
-
-    callback(new Error('Origin not allowed by CORS.'));
-  },
-  credentials: true,
-}));
+app.use(corsMiddleware);
 app.use(express.json());
+app.use('/api', globalApiRateLimit);
 app.use('/api/auth', authRoutes);
 app.use('/', authRoutes);
 app.use('/api/word', wordRoutes);
@@ -52,12 +26,10 @@ app.get('/', (_req, res) => {
   res.status(200).send('API is running');
 });
 
-const connectDatabase = async () => {
-  if (!MONGODB_URI) {
-    throw new Error('Missing MongoDB connection string. Set MONGODB_URI in your environment.');
-  }
+app.use(corsErrorHandler);
 
-  await mongoose.connect(MONGODB_URI);
+const connectDatabase = async () => {
+  await mongoose.connect(config.mongoUri);
   console.log('MongoDB connected successfully');
 };
 
@@ -65,8 +37,8 @@ const startServer = async () => {
   try {
     await connectDatabase();
 
-    app.listen(PORT, () => {
-      console.log(`Server is running on port ${PORT}`);
+    app.listen(config.port, () => {
+      console.log(`Server is running on port ${config.port}`);
     });
   } catch (error) {
     console.error('Failed to start server:', error.message);

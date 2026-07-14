@@ -104,18 +104,20 @@ export default function DashboardPage() {
   }
 
   return (
-    <section className="mx-auto max-w-7xl px-6 py-16 lg:px-10">
+    <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6 sm:py-12 lg:px-10 lg:py-16">
       <div className="mb-10 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div>
+        <div className="min-w-0">
           <p className="text-sm font-semibold uppercase tracking-[0.24em] text-cyan-300">
             Dashboard
           </p>
-          <h1 className="mt-3 font-serif text-5xl font-bold text-white">Your vocabulary progress</h1>
-          <p className="mt-4 text-lg text-white/45">
+          <h1 className="mt-3 break-words font-serif text-3xl font-bold text-white sm:text-4xl lg:text-5xl">
+            Your vocabulary progress
+          </h1>
+          <p className="mt-4 max-w-3xl break-words text-base text-white/45 sm:text-lg">
             Track saved words, surface unfinished review items, and keep your reading gains organized.
           </p>
         </div>
-        <div className="rounded-2xl border border-cyan-300/15 bg-cyan-400/10 px-5 py-4 text-sm text-cyan-100">
+        <div className="break-all rounded-2xl border border-cyan-300/15 bg-cyan-400/10 px-5 py-4 text-sm text-cyan-100">
           Signed in as {user.email}
         </div>
       </div>

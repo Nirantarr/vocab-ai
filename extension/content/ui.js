@@ -81,7 +81,9 @@ function renderField(label, value, { copyType = "", copyValue = value, copyFeedb
 }
 
 function normalizeRelationStatus(status) {
-  return status === "loading" || status === "complete" ? status : "complete";
+  return status === "loading" || status === "complete" || status === "skipped"
+    ? status
+    : "complete";
 }
 
 function getRelationValueMarkup(value, status = "complete") {
@@ -96,7 +98,7 @@ function getRelationValueMarkup(value, status = "complete") {
     return `<div class="vocabai-popup__value">${escapeHtml(normalizeListText(value))}</div>`;
   }
 
-  if (normalizedStatus === "complete") {
+  if (normalizedStatus === "complete" || normalizedStatus === "skipped") {
     return '<div class="vocabai-popup__value">No data available</div>';
   }
 

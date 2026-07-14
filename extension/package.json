@@ -1,0 +1,11 @@
+{
+  "name": "vocabai-extension",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "node build-manifest.mjs development",
+    "build": "node build-manifest.mjs production",
+    "manifest:dev": "node build-manifest.mjs development",
+    "manifest:prod": "node build-manifest.mjs production"
+  }
+}

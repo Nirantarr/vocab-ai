@@ -203,7 +203,10 @@ function setText(element, value = "") {
     return;
   }
 
-  element.textContent = value;
+  const sanitizeText = window.VocabAIExtension.sanitize?.sanitizeText;
+  element.textContent = typeof sanitizeText === "function"
+    ? sanitizeText(String(value ?? ""), String(value ?? ""))
+    : value;
 }
 
 function createRelationField(label, sectionKey) {
@@ -555,10 +558,10 @@ function getPopupRefs() {
   return popupRefs;
 }
 
-function closePopup() {
+function closePopup(reason = "programmatic") {
   if (!currentPopup) {
     if (typeof closeHandler === "function") {
-      closeHandler();
+      closeHandler(reason);
     }
 
     return;
@@ -583,7 +586,7 @@ function closePopup() {
   }
 
   if (typeof closeHandler === "function") {
-    closeHandler();
+    closeHandler(reason);
   }
 }
 
@@ -830,7 +833,7 @@ function handleManualClose(event) {
   event.stopPropagation();
   suppressNextSelection = true;
   clearSelection();
-  closePopup();
+  closePopup("manual");
 }
 
 window.VocabAIExtension.popup = {

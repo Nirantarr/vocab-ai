@@ -1,11 +1,5 @@
-import { API_ENDPOINTS } from "../utils/constants.js";
+import { API_ENDPOINTS, AUTH_ENDPOINTS } from "../utils/constants.js";
 
-const API_BASE_URL = "http://localhost:5000";
-const AUTH_ENDPOINTS = {
-  session: `${API_BASE_URL}/api/auth/session`,
-  refresh: `${API_BASE_URL}/api/auth/refresh`,
-  logout: `${API_BASE_URL}/api/auth/logout`,
-};
 const DEFAULT_TIMEOUT_MS = 8000;
 
 async function parseJson(response) {

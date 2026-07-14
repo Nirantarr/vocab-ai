@@ -1,4 +1,5 @@
 const bcrypt = require('bcryptjs');
+const config = require('../config/env');
 const User = require('../models/User');
 const {
   clearAuthCookies,
@@ -49,8 +50,7 @@ const signup = async (req, res) => {
       return res.status(409).json({ message: 'User already exists.' });
     }
 
-    const saltRounds = Number(process.env.BCRYPT_SALT_ROUNDS) || 10;
-    const hashedPassword = await bcrypt.hash(password, saltRounds);
+    const hashedPassword = await bcrypt.hash(password, config.auth.bcryptSaltRounds);
 
     const user = await User.create({
       email: normalizedEmail,

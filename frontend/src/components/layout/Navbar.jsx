@@ -12,11 +12,29 @@ const navLinks = [
   { label: 'Test', href: '/test' },
 ]
 
+function ThemeToggleButton({ className = '', compact = false }) {
+  return (
+    <button
+      type="button"
+      data-theme-toggle
+      className={className}
+      style={{
+        borderColor: "var(--border-subtle)",
+        color: "var(--text-primary)",
+        backgroundColor: "var(--surface-muted)",
+      }}
+    >
+      <span data-theme-icon className="text-base leading-none">{compact ? '☾' : '☾'}</span>
+      {!compact ? <span data-theme-label className="sr-only">Theme</span> : null}
+    </button>
+  )
+}
+
 export default function Navbar() {
   const [isOpen, setIsOpen] = useState(false)
   const { user, isAuthenticated, logout } = useAuth()
 
-  useEffect(() => initTheme(), [])
+  useEffect(() => initTheme(), [isOpen])
 
   const closeMenu = () => setIsOpen(false)
 
@@ -29,8 +47,8 @@ export default function Navbar() {
         color: "var(--text-primary)",
       }}
     >
-      <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 lg:px-10">
-        <Link to="/" onClick={closeMenu}>
+      <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-10">
+        <Link to="/" onClick={closeMenu} className="min-w-0">
           <Logo />
         </Link>
 
@@ -49,22 +67,11 @@ export default function Navbar() {
         </nav>
 
         <div className="hidden items-center gap-3 lg:flex">
-          <button
-            id="themeToggle"
-            type="button"
-            className="rounded-xl border px-3 py-2 text-sm font-semibold transition"
-            style={{
-              borderColor: "var(--border-subtle)",
-              color: "var(--text-primary)",
-              backgroundColor: "var(--surface-muted)",
-            }}
-          >
-            🌙
-          </button>
+          <ThemeToggleButton className="rounded-xl border px-3 py-2 text-sm font-semibold transition" />
           {isAuthenticated ? (
             <>
               <div
-                className="rounded-xl px-4 py-2 text-sm font-medium"
+                className="max-w-[18rem] truncate rounded-xl px-4 py-2 text-sm font-medium"
                 style={{
                   border: "1px solid var(--border-subtle)",
                   backgroundColor: "var(--surface-muted)",
@@ -107,22 +114,29 @@ export default function Navbar() {
           )}
         </div>
 
-        <button
-          type="button"
-          onClick={() => setIsOpen((open) => !open)}
-          className="rounded-xl border p-2 lg:hidden"
-          style={{ borderColor: "var(--border-subtle)", color: "var(--text-primary)" }}
-          aria-label="Toggle navigation"
-        >
-          <span className="block h-0.5 w-5 bg-current" />
-          <span className="mt-1.5 block h-0.5 w-5 bg-current" />
-          <span className="mt-1.5 block h-0.5 w-5 bg-current" />
-        </button>
+        <div className="flex items-center gap-2 lg:hidden">
+          <ThemeToggleButton
+            compact
+            className="rounded-xl border px-3 py-2 text-xs font-semibold transition sm:text-sm"
+          />
+          <button
+            type="button"
+            onClick={() => setIsOpen((open) => !open)}
+            className="rounded-xl border p-2"
+            style={{ borderColor: "var(--border-subtle)", color: "var(--text-primary)" }}
+            aria-label="Toggle navigation"
+            aria-expanded={isOpen}
+          >
+            <span className="block h-0.5 w-5 bg-current" />
+            <span className="mt-1.5 block h-0.5 w-5 bg-current" />
+            <span className="mt-1.5 block h-0.5 w-5 bg-current" />
+          </button>
+        </div>
       </div>
 
       {isOpen ? (
         <div
-          className="px-6 py-4 lg:hidden"
+          className="px-4 py-4 sm:px-6 lg:hidden"
           style={{
             borderTop: "1px solid var(--border-subtle)",
             backgroundColor: "var(--surface-elevated)",
@@ -154,11 +168,11 @@ export default function Navbar() {
               )
             )}
 
-            <div className="mt-2 flex gap-3">
+            <div className="mt-2 grid gap-3 sm:grid-cols-2">
               {isAuthenticated ? (
                 <>
                   <div
-                    className="flex-1 rounded-xl px-4 py-2.5 text-center text-sm font-medium"
+                    className="rounded-xl px-4 py-2.5 text-center text-sm font-medium break-all sm:col-span-2"
                     style={{
                       border: "1px solid var(--border-subtle)",
                       backgroundColor: "var(--surface-muted)",
@@ -173,7 +187,7 @@ export default function Navbar() {
                       logout()
                       closeMenu()
                     }}
-                    className="flex-1 rounded-xl border px-4 py-2.5 text-sm font-semibold"
+                    className="rounded-xl border px-4 py-2.5 text-sm font-semibold"
                     style={{
                       borderColor: "var(--border-subtle)",
                       color: "var(--button-muted-text)",
@@ -187,7 +201,7 @@ export default function Navbar() {
                   <Link
                     to="/login"
                     onClick={closeMenu}
-                    className="flex-1 rounded-xl border px-4 py-2.5 text-center text-sm font-semibold"
+                    className="rounded-xl border px-4 py-2.5 text-center text-sm font-semibold"
                     style={{
                       borderColor: "var(--border-subtle)",
                       color: "var(--button-muted-text)",
@@ -198,7 +212,7 @@ export default function Navbar() {
                   <Link
                     to="/login?mode=signup"
                     onClick={closeMenu}
-                    className="flex-1 rounded-xl bg-gradient-to-r from-cyan-400 to-violet-500 px-4 py-2.5 text-center text-sm font-semibold text-white"
+                    className="rounded-xl bg-gradient-to-r from-cyan-400 to-violet-500 px-4 py-2.5 text-center text-sm font-semibold text-white"
                   >
                     Register
                   </Link>

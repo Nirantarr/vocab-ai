@@ -20,6 +20,10 @@
   overflow: hidden;
 }
 
+.vocabai-popup[hidden] {
+  display: none !important;
+}
+
 .vocabai-popup.wide-popup {
   width: min(500px, 90vw);
 }

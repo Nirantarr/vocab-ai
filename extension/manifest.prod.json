@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
-  "name": "VocabAI Selection Helper",
+  "name": "__APP_NAME__",
   "version": "1.0.0",
   "description": "Shows a floating meaning card for selected text using backend data.",
   "permissions": ["activeTab", "storage", "scripting"],
   "host_permissions": [
-    "http://localhost:5000/*",
+    "__API_HOST_PERMISSION__",
     "https://cdn.jsdelivr.net/*",
     "https://tessdata.projectnaptha.com/*"
   ],
@@ -47,6 +47,6 @@
     "sandbox": "sandbox allow-scripts; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; child-src 'self' blob: https://cdn.jsdelivr.net; connect-src https://cdn.jsdelivr.net https://tessdata.projectnaptha.com;"
   },
   "externally_connectable": {
-    "matches": ["http://localhost:5173/*"]
+    "matches": ["__WEB_APP_MATCH__"]
   }
 }

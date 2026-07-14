@@ -1,30 +1,18 @@
-const FALLBACK_EXTENSION_ID = 'kkofmigllhfkhonhjcdonpnfmcmjbbgp'
-
-function getExtensionId() {
-  const envExtensionId = import.meta.env.VITE_EXTENSION_ID
-
-  if (typeof envExtensionId === 'string' && envExtensionId.trim()) {
-    return envExtensionId.trim()
-  }
-
-  return FALLBACK_EXTENSION_ID
-}
+import { EXTENSION_ID } from '../config/env'
 
 export async function notifyExtensionAuthSuccess(token) {
   if (typeof window === 'undefined' || !window.chrome?.runtime?.sendMessage) {
     return { success: false, skipped: true }
   }
 
-  if (typeof token !== 'string' || !token.trim()) {
+  if (typeof token !== 'string' || !token.trim() || !EXTENSION_ID) {
     return { success: false, skipped: true }
   }
-
-  const extensionId = getExtensionId()
 
   return new Promise((resolve) => {
     try {
       window.chrome.runtime.sendMessage(
-        extensionId,
+        EXTENSION_ID,
         {
           type: 'AUTH_SUCCESS',
           token: token.trim(),

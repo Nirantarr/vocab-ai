@@ -1,6 +1,38 @@
-import { fetchSession, fetchWordDetails, saveWordDetails, translateText } from "./api.js";
+import "../config/config.js";
+import { createRequestRouter } from "./services/requestRouter.js";
+
+const logger = {
+  debug(message, context = {}) {
+    console.log("[VocabAI]", { level: "debug", message, ...context });
+  },
+  info(message, context = {}) {
+    console.log("[VocabAI]", { level: "info", message, ...context });
+  },
+  warn(message, context = {}) {
+    console.warn("[VocabAI]", { level: "warn", message, ...context });
+  },
+  error(message, context = {}) {
+    console.error("[VocabAI]", { level: "error", message, ...context });
+  }
+};
 
 const requestControllers = new Map();
+let requestRouter = null;
+
+function ensureRequestRouter() {
+  if (requestRouter) {
+    return requestRouter;
+  }
+
+  const extensionConfig = globalThis.VocabAIExtension?.config || globalThis.VocabAIExtensionConfig;
+
+  if (!extensionConfig?.API_BASE_URL || !extensionConfig?.WEB_APP_URL) {
+    throw new Error("Extension configuration failed to initialize.");
+  }
+
+  requestRouter = createRequestRouter({ logger });
+  return requestRouter;
+}
 
 function getRequestKey(message, sender) {
   const senderScope = sender?.tab?.id ?? sender?.documentId ?? "global";
@@ -15,6 +47,10 @@ function getRequestKey(message, sender) {
 
   if (message?.type === "SAVE_WORD") {
     return `${senderScope}:save-word`;
+  }
+
+  if (message?.type === "GET_AUTH_STATUS") {
+    return `${senderScope}:auth-status`;
   }
 
   return null;
@@ -49,8 +85,14 @@ function cleanupRequestController(key, controller) {
 }
 
 async function handleMessage(message, sender) {
+  const activeRequestRouter = ensureRequestRouter();
   const { key, controller } = replaceRequestController(message, sender);
   const options = controller ? { signal: controller.signal } : undefined;
+
+  logger.debug("background_message_received", {
+    requestId: message?.requestId || null,
+    type: message?.type || "unknown"
+  });
 
   try {
     if (message?.type === "FETCH_WORD_DETAILS") {
@@ -60,7 +102,7 @@ async function handleMessage(message, sender) {
         throw new Error("Invalid selection payload.");
       }
 
-      const data = await fetchWordDetails(selectedText, options);
+      const data = await activeRequestRouter.fetchWordDetails(selectedText, options);
       return { success: true, data };
     }
 
@@ -73,12 +115,12 @@ async function handleMessage(message, sender) {
       }
 
       try {
-        const data = await saveWordDetails(
+        const data = await activeRequestRouter.saveWordDetails(
           {
             word,
             meaning: payload.meaning,
             synonyms: Array.isArray(payload.synonyms) ? payload.synonyms : [],
-            antonyms: Array.isArray(payload.antonyms) ? payload.antonyms : [],
+            antonyms: Array.isArray(payload.antonyms) ? payload.antonyms : []
           },
           options
         );
@@ -91,24 +133,24 @@ async function handleMessage(message, sender) {
 
         return {
           success: false,
-          error: error instanceof Error ? error.message : "FAILED",
+          error: error instanceof Error ? error.message : "FAILED"
         };
       }
     }
 
     if (message?.type === "GET_AUTH_STATUS") {
       try {
-        const session = await fetchSession(options);
+        const session = await activeRequestRouter.fetchSession(options);
         return {
           success: true,
           authenticated: Boolean(session?.authenticated),
-          user: session?.user || null,
+          user: session?.user || null
         };
       } catch (_error) {
         return {
           success: true,
           authenticated: false,
-          user: null,
+          user: null
         };
       }
     }
@@ -121,10 +163,10 @@ async function handleMessage(message, sender) {
         throw new Error("Invalid translation payload.");
       }
 
-      const data = await translateText(text, targetLang, options);
+      const data = await activeRequestRouter.translateText(text, targetLang, options);
       return {
         success: true,
-        data,
+        data
       };
     }
 
@@ -134,18 +176,39 @@ async function handleMessage(message, sender) {
   }
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  (async () => {
-    try {
-      const response = await handleMessage(message, sender);
-      sendResponse(response);
-    } catch (error) {
-      sendResponse({
-        success: false,
-        error: error instanceof Error ? error.message : "Unexpected extension error.",
-      });
-    }
-  })();
+async function respondToMessage(message, sender, sendResponse) {
+  try {
+    const response = await handleMessage(message, sender);
+    logger.info("background_response_sent", {
+      requestId: message?.requestId || null,
+      success: Boolean(response?.success),
+      type: message?.type || "unknown"
+    });
+    sendResponse(response);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unexpected extension error.";
 
-  return true;
-});
+    logger.error("background_message_failed", {
+      error: errorMessage,
+      requestId: message?.requestId || null,
+      type: message?.type || "unknown"
+    });
+    sendResponse({
+      success: false,
+      error: errorMessage
+    });
+  }
+}
+
+try {
+  ensureRequestRouter();
+
+  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    void respondToMessage(message, sender, sendResponse);
+    return true;
+  });
+} catch (error) {
+  logger.error("background_initialization_failed", {
+    error: error instanceof Error ? error.message : "Unknown background initialization error."
+  });
+}

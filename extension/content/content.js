@@ -1,12 +1,21 @@
 window.VocabAIExtension = window.VocabAIExtension || {};
 
 (function initializeContentScript() {
+  const extensionConfig = window.VocabAIExtension.config || globalThis.VocabAIExtensionConfig;
   const {
     DEFAULT_TARGET_LANG,
     LANGUAGE_OPTIONS,
     LONG_TEXT_THRESHOLD,
     normalizeRelationStatus
   } = window.VocabAIExtension.ui;
+  const logger = window.VocabAIExtension.logger;
+  const {
+    sanitizeErrorMessage,
+    sanitizeList,
+    sanitizeText
+  } = window.VocabAIExtension.sanitize;
+  const popupStateStore = window.VocabAIExtension.popupState;
+  const runtimeService = window.VocabAIExtension.runtimeService;
   const {
     initializePopupHandlers,
     getPopupRefs,
@@ -21,15 +30,21 @@ window.VocabAIExtension = window.VocabAIExtension || {};
   } = window.VocabAIExtension.popup;
   const { initializeSelectionListener } = window.VocabAIExtension.selection;
 
+  if (!extensionConfig?.WEB_APP_URL) {
+    throw new Error("Extension WEB_APP_URL configuration is missing.");
+  }
+
   const RELATION_POLL_INTERVAL_MS = 1200;
   const RELATION_POLL_MAX_ATTEMPTS = 6;
 
   let popupState = null;
   let popupRefs = null;
-  let listenersBound = false;
+  let boundPopupElement = null;
   let relationPollTimeoutId = null;
   let selectionRequestController = null;
   let translationRequestController = null;
+  let popupClosedManually = false;
+  let lastClosedSelectionSignature = "";
   const copyResetTimers = {};
 
   function ensurePopupRefs() {
@@ -52,6 +67,66 @@ window.VocabAIExtension = window.VocabAIExtension || {};
 
   function hasActivePopupState() {
     return Boolean(popupState?.word && popupState?.rect);
+  }
+
+  function isPdfPage() {
+    const href = String(globalThis.location?.href || "");
+    const protocol = String(globalThis.location?.protocol || "");
+    const contentType = String(document.contentType || "").toLowerCase();
+
+    if (protocol === "file:" && href.toLowerCase().includes(".pdf")) {
+      return true;
+    }
+
+    if (contentType === "application/pdf") {
+      return true;
+    }
+
+    if (
+      href.startsWith("chrome-extension://") &&
+      (
+        href.toLowerCase().includes(".pdf") ||
+        document.querySelector("embed[type='application/pdf'], pdf-viewer, viewer-toolbar")
+      )
+    ) {
+      return true;
+    }
+
+    return Boolean(document.querySelector("embed[type='application/pdf']"));
+  }
+
+  function buildSelectionSignature(text, rect) {
+    const normalizedText = sanitizeText(String(text || "").trim()).toLowerCase();
+
+    if (!normalizedText) {
+      return "";
+    }
+
+    const left = Number.isFinite(rect?.left) ? Math.round(rect.left) : 0;
+    const top = Number.isFinite(rect?.top) ? Math.round(rect.top) : 0;
+    const width = Number.isFinite(rect?.width) ? Math.round(rect.width) : 0;
+    const height = Number.isFinite(rect?.height) ? Math.round(rect.height) : 0;
+
+    return `${normalizedText}|${left}:${top}:${width}:${height}`;
+  }
+
+  function shouldPreventManualReopen(selection) {
+    if (!popupClosedManually || !selection) {
+      return false;
+    }
+
+    const signature = buildSelectionSignature(selection.text, selection.rect);
+
+    if (!signature || signature !== lastClosedSelectionSignature) {
+      return false;
+    }
+
+    logger?.debug("popup_recreation_prevented", {
+      reason: "manual_close_guard",
+      isPdfPage: isPdfPage(),
+      signature
+    });
+    return true;
   }
 
   function isPopupInteraction(event) {
@@ -84,8 +159,25 @@ window.VocabAIExtension = window.VocabAIExtension || {};
     return false;
   }
 
-  function isSingleWordSelection(value) {
+  function isSingleWord(value) {
     return /^[a-zA-Z][a-zA-Z'-]*$/.test(value);
+  }
+
+  function sanitizeSelectionText(value) {
+    if (typeof value !== "string") {
+      return "";
+    }
+
+    return value
+      .replace(/[\[\](){}<>]/g, " ")
+      .replace(/^[^a-zA-Z]+|[^a-zA-Z]+$/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function getSelectionMode(value) {
+    const sanitizedText = sanitizeSelectionText(value);
+    return isSingleWord(sanitizedText) ? "word" : "text";
   }
 
   function buildDefaultPopupRect() {
@@ -100,9 +192,7 @@ window.VocabAIExtension = window.VocabAIExtension || {};
   }
 
   function normalizeList(values) {
-    return Array.isArray(values)
-      ? values.filter((value) => typeof value === "string" && value.trim())
-      : [];
+    return sanitizeList(values);
   }
 
   function formatList(values) {
@@ -117,8 +207,8 @@ window.VocabAIExtension = window.VocabAIExtension || {};
 
     const normalizedValue = Array.isArray(value) ? formatList(value) : String(value || "").trim();
     button.dataset.copyType = copyType;
-    button.dataset.copyValue = normalizedValue || "No data available";
-    button.textContent = feedback || "Copy";
+    button.dataset.copyValue = sanitizeText(normalizedValue, "No data available") || "No data available";
+    button.textContent = sanitizeText(feedback, "Copy") || "Copy";
     button.hidden = Boolean(hidden);
   }
 
@@ -127,7 +217,7 @@ window.VocabAIExtension = window.VocabAIExtension || {};
       return;
     }
 
-    element.textContent = value;
+    element.textContent = sanitizeText(value, value);
     element.classList.toggle("vocabai-popup__value--loading", Boolean(loading));
     element.classList.toggle("vocabai-popup__status--error", Boolean(error));
   }
@@ -138,7 +228,7 @@ window.VocabAIExtension = window.VocabAIExtension || {};
     }
 
     element.hidden = Boolean(hidden || !message);
-    element.textContent = message || "";
+    element.textContent = sanitizeText(message || "", message || "");
     element.classList.toggle("vocabai-popup__status--error", Boolean(error));
   }
 
@@ -235,6 +325,13 @@ window.VocabAIExtension = window.VocabAIExtension || {};
 
   function renderMeaning() {
     const refs = ensurePopupRefs();
+    const isWordMode = popupState?.mode === "word";
+    setHidden(refs.meaningField, !isWordMode);
+
+    if (!isWordMode) {
+      return;
+    }
+
     updateTextBlock(
       refs.meaningValue,
       popupState?.meaning || "No meaning available."
@@ -283,6 +380,8 @@ window.VocabAIExtension = window.VocabAIExtension || {};
       );
     }
 
+    setHidden(refs.translateSelect, false);
+    setHidden(refs.translateButton, false);
     refs.translateSelect.value = getAllowedLanguage(popupState?.targetLang);
     refs.translateButton.disabled = state === "loading";
     refs.translateButton.textContent = state === "loading" ? "Translating..." : "Translate";
@@ -352,15 +451,43 @@ window.VocabAIExtension = window.VocabAIExtension || {};
 
   function renderRelations() {
     const refs = ensurePopupRefs();
+    const isWordMode = popupState?.mode === "word";
+    setHidden(refs.synonymsField, !isWordMode);
+    setHidden(refs.antonymsField, !isWordMode);
+
+    if (!isWordMode) {
+      return;
+    }
+
     renderList(refs.synonymsField, popupState?.synonyms, popupState?.relationFetchStatus);
     renderList(refs.antonymsField, popupState?.antonyms, popupState?.relationFetchStatus);
   }
 
   function renderStaticSections() {
     const refs = ensurePopupRefs();
-    refs.translateSelect.innerHTML = LANGUAGE_OPTIONS.map(({ label, value }) => `
-      <option value="${value}">${label}</option>
-    `).join("");
+
+    if (!refs?.translateSelect) {
+      return;
+    }
+
+    const existingOptionValues = Array.from(refs.translateSelect.options).map((option) => option.value);
+    const expectedOptionValues = LANGUAGE_OPTIONS.map((option) => option.value);
+
+    if (
+      existingOptionValues.length === expectedOptionValues.length &&
+      existingOptionValues.every((value, index) => value === expectedOptionValues[index])
+    ) {
+      return;
+    }
+
+    refs.translateSelect.replaceChildren();
+
+    LANGUAGE_OPTIONS.forEach(({ label, value }) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      refs.translateSelect.appendChild(option);
+    });
   }
 
   function renderWordDetails() {
@@ -374,11 +501,20 @@ window.VocabAIExtension = window.VocabAIExtension || {};
   }
 
   function bindPopupListeners() {
-    if (listenersBound) {
+    const refs = ensurePopupRefs();
+
+    if (!refs?.popup) {
       return;
     }
 
-    const refs = ensurePopupRefs();
+    if (
+      boundPopupElement &&
+      boundPopupElement === refs.popup &&
+      document.body.contains(boundPopupElement)
+    ) {
+      return;
+    }
+
     renderStaticSections();
 
     refs.previewToggle.addEventListener("mousedown", (event) => {
@@ -396,12 +532,13 @@ window.VocabAIExtension = window.VocabAIExtension || {};
         return;
       }
 
-      popupState = {
-        ...popupState,
-        isExpanded: !popupState.isExpanded
-      };
-      renderSelectionPreview();
-      renderHeader();
+    popupState = {
+      ...popupState,
+      isExpanded: !popupState.isExpanded
+    };
+    popupStateStore.setState(popupState);
+    renderSelectionPreview();
+    renderHeader();
     });
 
     refs.popup.addEventListener("click", async (event) => {
@@ -448,10 +585,12 @@ window.VocabAIExtension = window.VocabAIExtension || {};
       popupState = {
         ...popupState,
         targetLang: nextLang,
+        translationLoading: false,
         translatedText: "",
         translationState: "idle",
         translationMessage: ""
       };
+      popupStateStore.setState(popupState);
       renderTranslation();
 
       try {
@@ -459,14 +598,16 @@ window.VocabAIExtension = window.VocabAIExtension || {};
       } catch (_error) {
         popupState = {
           ...popupState,
+          translationLoading: false,
           translationState: "error",
           translationMessage: "Translation failed"
         };
+        popupStateStore.setState(popupState);
         renderTranslation();
       }
     });
 
-    listenersBound = true;
+    boundPopupElement = refs.popup;
   }
 
   async function copyToClipboard(text) {
@@ -500,6 +641,7 @@ window.VocabAIExtension = window.VocabAIExtension || {};
           [copyType]: ""
         }
       };
+      popupStateStore.setState(popupState);
 
       if (copyType === "meaning") {
         renderMeaning();
@@ -535,6 +677,7 @@ window.VocabAIExtension = window.VocabAIExtension || {};
         }
       };
     } catch (_error) {
+      logger?.warn("copy_failed", { copyType });
       popupState = {
         ...popupState,
         copyFeedback: {
@@ -543,6 +686,7 @@ window.VocabAIExtension = window.VocabAIExtension || {};
         }
       };
     }
+    popupStateStore.setState(popupState);
 
     if (copyType === "meaning") {
       renderMeaning();
@@ -583,88 +727,13 @@ window.VocabAIExtension = window.VocabAIExtension || {};
     translationRequestController = null;
     clearRelationPolling();
     popupState = null;
+    popupStateStore.resetState();
     popupRefs = null;
-  }
-
-  function createAbortError() {
-    return new DOMException("Operation aborted.", "AbortError");
-  }
-
-  function sendRuntimeMessage(message, signal) {
-    return new Promise((resolve, reject) => {
-      if (!isExtensionContextAvailable()) {
-        reject(new Error("Extension context invalidated."));
-        return;
-      }
-
-      let settled = false;
-      let abortHandler = null;
-
-      const cleanup = () => {
-        if (signal && abortHandler) {
-          signal.removeEventListener("abort", abortHandler);
-        }
-      };
-
-      abortHandler = () => {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        cleanup();
-        reject(createAbortError());
-      };
-
-      if (signal) {
-        if (signal.aborted) {
-          abortHandler();
-          return;
-        }
-
-        signal.addEventListener("abort", abortHandler, { once: true });
-      }
-
-      try {
-        chrome.runtime.sendMessage(message, (response) => {
-          if (settled) {
-            return;
-          }
-
-          settled = true;
-          cleanup();
-
-          if (!isExtensionContextAvailable()) {
-            reject(new Error("Extension context invalidated."));
-            return;
-          }
-
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-            return;
-          }
-
-          if (!response?.success) {
-            reject(new Error(response?.error || "Request failed."));
-            return;
-          }
-
-          resolve(response.data ?? response);
-        });
-      } catch (error) {
-        if (settled) {
-          return;
-        }
-
-        settled = true;
-        cleanup();
-        reject(error);
-      }
-    });
+    boundPopupElement = null;
   }
 
   function fetchWordDetails(selectedText, signal) {
-    return sendRuntimeMessage(
+    return runtimeService.sendMessage(
       {
         type: "FETCH_WORD_DETAILS",
         text: selectedText
@@ -674,7 +743,7 @@ window.VocabAIExtension = window.VocabAIExtension || {};
   }
 
   function saveWordDetails(wordData, signal) {
-    return sendRuntimeMessage(
+    return runtimeService.sendMessage(
       {
         type: "SAVE_WORD",
         data: wordData
@@ -684,7 +753,7 @@ window.VocabAIExtension = window.VocabAIExtension || {};
   }
 
   function requestTranslation(text, targetLang, signal) {
-    return sendRuntimeMessage(
+    return runtimeService.sendMessage(
       {
         type: "TRANSLATE_TEXT",
         text,
@@ -695,83 +764,17 @@ window.VocabAIExtension = window.VocabAIExtension || {};
   }
 
   function getAuthStatus() {
-    return sendRuntimeMessage({ type: "GET_AUTH_STATUS" }).then((response) =>
+    return runtimeService.sendMessage({ type: "GET_AUTH_STATUS" }).then((response) =>
       Boolean(response?.authenticated)
     );
   }
 
   function getStoredTargetLanguage() {
-    return new Promise((resolve, reject) => {
-      if (!isExtensionContextAvailable()) {
-        reject(new Error("Extension context invalidated."));
-        return;
-      }
-
-      try {
-        chrome.storage.local.get("targetLang", (result) => {
-          if (!isExtensionContextAvailable()) {
-            reject(new Error("Extension context invalidated."));
-            return;
-          }
-
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-            return;
-          }
-
-          const storedValue = typeof result?.targetLang === "string" ? result.targetLang : "";
-          const targetLang = getAllowedLanguage(storedValue);
-
-          if (storedValue) {
-            resolve(targetLang);
-            return;
-          }
-
-          chrome.storage.local.set({ targetLang }, () => {
-            if (!isExtensionContextAvailable()) {
-              reject(new Error("Extension context invalidated."));
-              return;
-            }
-
-            if (chrome.runtime.lastError) {
-              reject(new Error(chrome.runtime.lastError.message));
-              return;
-            }
-
-            resolve(targetLang);
-          });
-        });
-      } catch (error) {
-        reject(error);
-      }
-    });
+    return runtimeService.getStoredTargetLanguage(DEFAULT_TARGET_LANG, getAllowedLanguage);
   }
 
   function setStoredTargetLanguage(targetLang) {
-    return new Promise((resolve, reject) => {
-      if (!isExtensionContextAvailable()) {
-        reject(new Error("Extension context invalidated."));
-        return;
-      }
-
-      try {
-        chrome.storage.local.set({ targetLang }, () => {
-          if (!isExtensionContextAvailable()) {
-            reject(new Error("Extension context invalidated."));
-            return;
-          }
-
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message));
-            return;
-          }
-
-          resolve();
-        });
-      } catch (error) {
-        reject(error);
-      }
-    });
+    return runtimeService.setStoredTargetLanguage(targetLang);
   }
 
   async function handleTranslate() {
@@ -784,10 +787,12 @@ window.VocabAIExtension = window.VocabAIExtension || {};
 
     popupState = {
       ...popupState,
+      translationLoading: true,
       translationState: "loading",
       translationMessage: "",
       translatedText: ""
     };
+    popupStateStore.setState(popupState);
     renderTranslation();
 
     try {
@@ -799,22 +804,29 @@ window.VocabAIExtension = window.VocabAIExtension || {};
 
       popupState = {
         ...popupState,
+        translationLoading: false,
         translationState: "success",
         translationMessage: "",
         translatedText: response?.translatedText || ""
       };
+      popupStateStore.setState(popupState);
       renderTranslation();
     } catch (error) {
       if (error?.name === "AbortError") {
         return;
       }
 
+      logger?.warn("translation_failed", {
+        error: sanitizeErrorMessage(error)
+      });
       popupState = {
         ...popupState,
+        translationLoading: false,
         translationState: "error",
         translationMessage: "Translation failed",
         translatedText: ""
       };
+      popupStateStore.setState(popupState);
       renderTranslation();
     }
   }
@@ -825,7 +837,7 @@ window.VocabAIExtension = window.VocabAIExtension || {};
     }
 
     if (!popupState.isAuthenticated) {
-      window.open("http://localhost:5173/login", "_blank", "noopener,noreferrer");
+      window.open(`${extensionConfig.WEB_APP_URL}/login`, "_blank", "noopener,noreferrer");
       return;
     }
 
@@ -834,6 +846,7 @@ window.VocabAIExtension = window.VocabAIExtension || {};
       saveState: "saving",
       saveMessage: ""
     };
+    popupStateStore.setState(popupState);
     renderSaveSection();
 
     try {
@@ -850,6 +863,7 @@ window.VocabAIExtension = window.VocabAIExtension || {};
           saveState: "saved",
           saveMessage: "Saved successfully \u2705"
         };
+        popupStateStore.setState(popupState);
         renderSaveSection();
         return;
       }
@@ -859,18 +873,27 @@ window.VocabAIExtension = window.VocabAIExtension || {};
         saveState: "error",
         saveMessage: "Failed to save"
       };
+      popupStateStore.setState(popupState);
       renderSaveSection();
     } catch (_error) {
+      logger?.warn("save_failed", {
+        error: sanitizeErrorMessage(_error)
+      });
       popupState = {
         ...popupState,
         saveState: "error",
         saveMessage: "Failed to save"
       };
+      popupStateStore.setState(popupState);
       renderSaveSection();
     }
   }
 
   async function pollForRelationUpdates(text, controller, attemptsLeft) {
+    if (popupState?.mode !== "word") {
+      return;
+    }
+
     if (!controller || controller.signal.aborted || attemptsLeft <= 0) {
       return;
     }
@@ -889,13 +912,15 @@ window.VocabAIExtension = window.VocabAIExtension || {};
           return;
         }
 
-        popupState = {
-          ...popupState,
-          synonyms: normalizeList(data.synonyms),
-          antonyms: normalizeList(data.antonyms),
-          relationFetchStatus: normalizeRelationStatus(data.relationFetchStatus)
-        };
-        renderRelations();
+      popupState = {
+        ...popupState,
+        synonyms: normalizeList(data.synonyms),
+        antonyms: normalizeList(data.antonyms),
+        relationFetchStatus: normalizeRelationStatus(data.relationFetchStatus),
+        relationLoading: normalizeRelationStatus(data.relationFetchStatus) === "loading"
+      };
+      popupStateStore.setState(popupState);
+      renderRelations();
 
         if (popupState.relationFetchStatus === "loading") {
           await pollForRelationUpdates(text, controller, attemptsLeft - 1);
@@ -909,8 +934,10 @@ window.VocabAIExtension = window.VocabAIExtension || {};
 
       popupState = {
         ...popupState,
-        relationFetchStatus: "complete"
+        relationFetchStatus: "complete",
+        relationLoading: false
       };
+      popupStateStore.setState(popupState);
       renderRelations();
     }, RELATION_POLL_INTERVAL_MS);
   }
@@ -922,34 +949,50 @@ window.VocabAIExtension = window.VocabAIExtension || {};
 
     selectionRequestController = new AbortController();
     const { signal } = selectionRequestController;
+    const sanitizedText = sanitizeSelectionText(text);
+    const mode = getSelectionMode(text);
+    const isWordMode = mode === "word";
+    const lookupText = isWordMode ? sanitizedText : text.trim();
+    popupClosedManually = false;
+    lastClosedSelectionSignature = "";
     const refs = showPopup(rect, {
       wide: text.length > LONG_TEXT_THRESHOLD,
       preservePosition: true
+    });
+    logger?.info("popup_created", {
+      isPdfPage: isPdfPage(),
+      mode,
+      text: sanitizeText(text)
     });
 
     bindPopupListeners();
     popupState = {
       selectedText: text,
       rect,
-      word: text,
+      mode,
+      word: isWordMode ? lookupText : text,
       language: "",
-      meaning: "Loading...",
+      meaning: isWordMode ? "Loading..." : "",
       synonyms: [],
       antonyms: [],
-      relationFetchStatus: "loading",
+      relationFetchStatus: isWordMode ? "loading" : "skipped",
       targetLang: DEFAULT_TARGET_LANG,
+      translationLoading: false,
+      relationLoading: isWordMode,
+      wordLoading: isWordMode,
       translationState: "idle",
       translationMessage: "",
       translatedText: "",
       saveState: "idle",
       saveMessage: "",
       isAuthenticated: false,
-      allowSave: isSingleWordSelection(text),
+      allowSave: isWordMode,
       showTranslate: true,
       isLongSelection: text.length > LONG_TEXT_THRESHOLD,
       isExpanded: false,
       copyFeedback: {}
     };
+    popupStateStore.setState(popupState);
 
     refs.popup.classList.toggle("wide-popup", popupState.isLongSelection);
     renderHeader();
@@ -958,11 +1001,39 @@ window.VocabAIExtension = window.VocabAIExtension || {};
     renderRelations();
     renderTranslation();
     renderSaveSection();
-    renderStatusSection({ loading: true, message: "Loading..." });
+    renderStatusSection({
+      loading: Boolean(popupState.wordLoading),
+      message: popupState.wordLoading ? "Loading..." : ""
+    });
+
+    if (!isWordMode) {
+      try {
+        const targetLang = await getStoredTargetLanguage().catch(() => DEFAULT_TARGET_LANG);
+
+        if (signal.aborted) {
+          return;
+        }
+
+        popupState = {
+          ...popupState,
+          targetLang,
+          wordLoading: false,
+          relationLoading: false,
+          relationFetchStatus: "skipped"
+        };
+        popupStateStore.setState(popupState);
+        renderWordDetails();
+        renderStatusSection();
+      } catch (_error) {
+        renderStatusSection();
+      }
+
+      return;
+    }
 
     try {
       const [data, authenticated, targetLang] = await Promise.all([
-        fetchWordDetails(text, signal),
+        fetchWordDetails(lookupText, signal),
         getAuthStatus().catch(() => false),
         getStoredTargetLanguage().catch(() => DEFAULT_TARGET_LANG)
       ]);
@@ -979,15 +1050,18 @@ window.VocabAIExtension = window.VocabAIExtension || {};
         synonyms: normalizeList(data.synonyms),
         antonyms: normalizeList(data.antonyms),
         relationFetchStatus: normalizeRelationStatus(data.relationFetchStatus),
+        wordLoading: false,
+        relationLoading: normalizeRelationStatus(data.relationFetchStatus) === "loading",
         targetLang,
         isAuthenticated: authenticated,
-        allowSave: isSingleWordSelection(text)
+        allowSave: isWordMode
       };
+      popupStateStore.setState(popupState);
 
       renderWordDetails();
 
       if (popupState.relationFetchStatus === "loading") {
-        await pollForRelationUpdates(text, selectionRequestController, RELATION_POLL_MAX_ATTEMPTS);
+        await pollForRelationUpdates(lookupText, selectionRequestController, RELATION_POLL_MAX_ATTEMPTS);
         return;
       }
     } catch (error) {
@@ -1003,12 +1077,19 @@ window.VocabAIExtension = window.VocabAIExtension || {};
         synonyms: [],
         antonyms: [],
         relationFetchStatus: "complete",
+        wordLoading: false,
+        relationLoading: false,
         allowSave: false
       };
+      popupStateStore.setState(popupState);
       renderWordDetails();
       renderStatusSection({
-        message: error instanceof Error ? error.message : "Failed to fetch meaning",
+        message: sanitizeErrorMessage(error, "Failed to fetch meaning"),
         error: true
+      });
+      logger?.error("word_lookup_failed", {
+        error: sanitizeErrorMessage(error),
+        text: sanitizeText(text)
       });
       return;
     }
@@ -1022,13 +1103,33 @@ window.VocabAIExtension = window.VocabAIExtension || {};
       return;
     }
 
+    if (shouldPreventManualReopen(selection)) {
+      return;
+    }
+
+    popupClosedManually = false;
+    lastClosedSelectionSignature = "";
+
     await loadAnalysisFromText(selection.text, selection.rect);
   }
 
   initializePopupHandlers();
-  ensurePopupRefs();
-  bindPopupListeners();
-  setCloseHandler(() => {
+  logger?.info("content_script_initialized", {
+    isPdfPage: isPdfPage()
+  });
+  setCloseHandler((reason = "programmatic") => {
+    const closeSignature = buildSelectionSignature(popupState?.selectedText, popupState?.rect);
+
+    if (reason === "manual") {
+      popupClosedManually = true;
+      lastClosedSelectionSignature = closeSignature;
+    }
+
+    logger?.info("popup_closed", {
+      isPdfPage: isPdfPage(),
+      reason,
+      signature: closeSignature
+    });
     resetPopupState();
   });
   initializeSelectionListener({
@@ -1048,10 +1149,22 @@ window.VocabAIExtension = window.VocabAIExtension || {};
     },
     showOcrLoading: (label = "Scanning image...") => {
       showPopup(buildDefaultPopupRect(), { wide: true, preservePosition: true });
+      bindPopupListeners();
+      logger?.info("popup_created", {
+        isPdfPage: isPdfPage(),
+        mode: "ocr-loading",
+        text: sanitizeText(label)
+      });
       renderStatusSection({ loading: true, message: label });
     },
     showOcrError: (message = "OCR failed") => {
       showPopup(buildDefaultPopupRect(), { wide: true, preservePosition: true });
+      bindPopupListeners();
+      logger?.info("popup_created", {
+        isPdfPage: isPdfPage(),
+        mode: "ocr-error",
+        text: sanitizeText(message)
+      });
       renderStatusSection({ message, error: true });
     }
   };

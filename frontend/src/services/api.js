@@ -1,5 +1,5 @@
-const API_BASE_URL = 'http://localhost:5000'
-const AUTH_BASE_URL = `${API_BASE_URL}/api/auth`
+import { API_BASE_URL, AUTH_BASE_URL } from '../config/env'
+
 const AUTH_EXPIRED_EVENT = 'vocabai:auth-expired'
 
 const AUTH_ENDPOINTS = {
