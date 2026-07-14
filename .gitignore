@@ -4,13 +4,7 @@ node_modules/
 # env files
 .env
 .env.*
-!backend/.env.example
-!frontend/.env.example
-!frontend/.env.development
-!frontend/.env.production
-!extension/.env.example
-!extension/.env.development
-!extension/.env.production
+!**/.env.example
 
 # build files
 dist/
