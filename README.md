@@ -6,7 +6,7 @@ VocabAI now uses environment-based configuration for the backend, frontend, and 
 
 1. Copy [backend/.env.example](/D:/vocab-ai/backend/.env.example) to `backend/.env`.
 2. Fill in the required values.
-3. Start the API with `npm run dev` or `npm start` inside `backend`.
+3. Start the frontend with `npm run dev` or `npm start` inside and backend using `nodemon server.js`.
 
 Required backend variables:
 
